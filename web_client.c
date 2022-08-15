@@ -8,10 +8,12 @@ int main(int argc, char *argv[]){
    int process_count = 5;
    char *web_data_dir_name = NULL;
    int web_data_dir = 0;
-   int queue_fd = 0;
+   int todolist_fd = 0;
    _DISK_HASH dh;
    int temp_fd = 0;
    int *child_state = NULL;
+   char **child_catch_url = NULL;
+   char *todolist_fname = NULL;
 
    if (argc < 3 || argc > 4){
       printf("parameter error!!\n");
@@ -97,32 +99,32 @@ int main(int argc, char *argv[]){
       goto ERROR;
    }
 
-   char *queue_filename = NULL;
-   queue_filename = (char*)malloc(strlen(output_dir) + 1 + sizeof(QUEUE_FILE_NAME));
-   if(!queue_filename){
+   
+   todolist_fname = (char*)malloc(strlen(output_dir) + 1 + sizeof(QUEUE_FILE_NAME));
+   if(!todolist_fname){
       ret_val = ERR_OUT_OF_MEM;
-      printf("queue_filename malloc ERROR!\n");
+      printf("todolist_fname malloc ERROR!\n");
 
       goto ERROR;
    }
 
-   strncpy(queue_filename, output_dir, strlen(output_dir) + 1);
-   strcat(queue_filename, QUEUE_FILE_NAME);
+   strncpy(todolist_fname, output_dir, strlen(output_dir) + 1);
+   strcat(todolist_fname, QUEUE_FILE_NAME);
 
  #ifdef _DEBUG
-   printf("queue file name : %s\n", queue_filename);
+   printf("todolist file name : %s\n", todolist_fname);
  #endif
 
-   queue_fd = open(queue_filename, O_RDWR | O_CREAT | O_TRUNC, 0777);
-   if(queue_fd < 0){
+   todolist_fd = open(todolist_fname, O_RDWR | O_CREAT | O_TRUNC, 0777);
+   if(todolist_fd < 0){
       ret_val = errno;
-      printf("queue file open ERROR!");
+      printf("todolist file open ERROR!\n");
 
       goto ERROR;
    }
 
    add_todolist[strlen(add_todolist)] = '\n';
-   if(0 >= write(queue_fd, add_todolist, strlen(add_todolist))){
+   if(0 >= write(todolist_fd, add_todolist, strlen(add_todolist))){
       printf("write add_todolist to queue ERROR!\n");
       ret_val = errno;
 
@@ -139,19 +141,37 @@ int main(int argc, char *argv[]){
    temp_fd = open(FILE_LOCK, O_RDWR | O_CREAT | O_TRUNC, 0777);
    if(temp_fd < 0){
       ret_val = errno;
-      printf("temp_fd file open ERROR!");
+      printf("temp_fd file open ERROR!\n");
 
       goto ERROR;
    }
 
-   child_state = mmap(NULL, process_count * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+   child_state = (int*)mmap(NULL, process_count * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
    if(child_state == MAP_FAILED){
-      printf("mmap ERROR!\n");
+      printf("child_state mmap ERROR!\n");
       ret_val = errno;
 
       goto ERROR;
    }
    memset(child_state, STATE_READY, process_count * sizeof(int));
+
+   child_catch_url = (char**)mmap(NULL, process_count * sizeof(char*), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+   if(child_catch_url == MAP_FAILED){
+      printf("child_catch_url mmap ERROR!\n");
+      ret_val = errno;
+
+      goto ERROR;
+   }
+   for(int i = 0; i < process_count; i++){
+      child_catch_url[i] = (char*)mmap(NULL, URL_LIMIT * sizeof(char), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+      if(child_catch_url[i] == MAP_FAILED){
+         printf("child_catch_url[%2d] mmap ERROR!\n", i);
+         ret_val = errno;
+
+         goto ERROR;
+      }
+      child_catch_url[i][URL_LIMIT] = '\0';
+   }
 
  #ifdef _DEBUG
    _OPENSSL SSL;
@@ -206,12 +226,27 @@ int main(int argc, char *argv[]){
       }
    }
 
-   //child do
    if(index != -1){
+      //child do
+      prctl(PR_SET_PDEATHSIG,SIGKILL);
+      
+   }
+   else{
+      //parent do
 
+      //如果同時有多個子程序掛掉怎麼辦?
+      //signal(SIGCHLD, sub_quit_signal_handle);
+
+      ret_val = parent_func(process_count, child_pid, child_state, todolist_fname);
+      if(ret_val){
+         ret_val = errno;
+         printf("parent function ERROR!\n");
+
+         goto ERROR;
+      }
    }
 
-   //parent do
+   
 
 
 
@@ -222,10 +257,10 @@ int main(int argc, char *argv[]){
       free(host_url);
    if(add_todolist)
       free(add_todolist);
-   if(queue_filename)
-      free(queue_filename);
-   if(queue_fd > 0)
-      close(queue_fd);
+   if(todolist_fname)
+      free(todolist_fname);
+   if(todolist_fd > 0)
+      close(todolist_fd);
    if(temp_fd > 0){
       close(temp_fd);
       remove(FILE_LOCK);
@@ -234,6 +269,14 @@ int main(int argc, char *argv[]){
       free(web_data_dir_name);
    if(child_state != MAP_FAILED)
       munmap(child_state, process_count * sizeof(int));
+   if(child_catch_url){
+      for(int i = 0; i < process_count; i++){
+         if(child_catch_url[i]){
+            munmap(child_catch_url[i], URL_LIMIT * sizeof(char));
+         }
+      }
+      munmap(child_catch_url, process_count * sizeof(char*));
+   }
 
    /* if(index == -1)
       close_table(&dh); */
@@ -287,7 +330,7 @@ int to_do_list_url_string_conversion(const char original[], const char new[]){
    return SUCCESS;
 }
 
-int create_dir(const char* dir_name) {
+int create_dir(const char* dir_name){
    if(!dir_name){
       return ERR_PARAMETER;
    }
@@ -326,7 +369,7 @@ int create_dir(const char* dir_name) {
    return SUCCESS;
 }
 
-int openSSL_connect(const char host[], _OPENSSL *SSL) {
+int openSSL_connect(const char host[], _OPENSSL *SSL){
    if(!host || !SSL){
       return ERR_PARAMETER;
    }
@@ -435,7 +478,7 @@ int openSSL_connect(const char host[], _OPENSSL *SSL) {
    return SUCCESS;
 }
 
-int create_socket(const char hostname[]) {
+int create_socket(const char hostname[]){
    if(!hostname){
       return ERR_PARAMETER;
    }
@@ -450,8 +493,8 @@ int create_socket(const char hostname[]) {
    /* ---------------------------------------------------------- *
    * if the hostname contains a colon :, we got a port number   *
    * ---------------------------------------------------------- */
-   if (strchr(hostname, ':')) {
-      tmp_ptr = strchr(hostname, ':');
+   if (tmp_ptr = strchr(hostname, ':')) {
+      // strchr(hostname, ':');
       /* the last : starts the port number, if avail, i.e. 8443 */
       strncpy(portnum, tmp_ptr+1,  sizeof(portnum));
       *tmp_ptr = '\0';
@@ -496,7 +539,7 @@ int create_socket(const char hostname[]) {
    return sockfd;
 }
 
-int openSSL_close(_OPENSSL *SSL) {
+int openSSL_close(_OPENSSL *SSL){
    if(!SSL){
       return ERR_PARAMETER;
    }
@@ -511,3 +554,70 @@ int openSSL_close(_OPENSSL *SSL) {
 
    return SUCCESS;
 }
+
+int parent_func(int process_count, int *child_pid, int *child_state, char *todolist_fname){
+   while(1) {
+      sleep(PARENT_SLEEP_TIME);
+
+      bool end = TRUE;
+
+      for(int i = 0; i < process_count; i++){
+         if(kill(child_pid[i], SIGSTOP) == -1){
+            i--;
+            printf("pid : %5d, kill SIGSTOP ERROR : %2d !\n", child_pid[i], errno);
+            errno = SUCCESS;
+         }
+      }
+
+      for(int i = 0; i < process_count; i++){
+         if(child_state[i] != STATE_READY){
+            end = FALSE;
+
+            break;
+         }
+      }
+
+      if(end){
+         struct stat info;
+         if(stat(todolist_fname, &info)){
+            printf("parent stat ERROR! : %s\n", strerror(errno));
+
+            return ERR_TODOLIST;
+         }
+
+         if(!info.st_size){
+            for(int i = 0; i < process_count; i++){
+               child_state[i] = STATE_END;  
+            }
+         }
+      }
+
+      for(int i = 0; i < process_count; i++){
+         if(kill(child_pid[i], SIGCONT) == -1){
+            i--;
+            printf("pid : %5d, kill SIGCONT ERROR : %2d !\n", child_pid[i], errno);
+            errno = SUCCESS;
+         }
+      }
+
+      if(end){
+         break;
+      }
+   }
+
+
+   return SUCCESS;
+}
+
+//*************************//
+/* void sub_quit_signal_handle(int sig){
+   int status;
+   //获取退出的那个子进程的状态
+   int quit_pid = //wait(&status);
+   printf("sub process %d quit, exit status %d\n", quit_pid, status);
+
+   //新创建一个子进程
+   pid_t pid = fork();
+     if( 0 == pid)
+         ChildCycle();
+} */

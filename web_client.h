@@ -19,6 +19,7 @@
 #include <wait.h>
 #include <time.h>
 #include <dirent.h>
+#include <stdbool.h>
 
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
@@ -48,17 +49,22 @@
 #define ERR_CHILD          ERR_BASE - 11
 #define ERR_SSL_CONNCET    ERR_BASE - 12
 #define ERR_URL            ERR_BASE - 13
+#define ERR_TODOLIST       ERR_BASE - 14
 
 #define NOT_FOUND          ERR_BASE - 100
 
 //#define MAX_URL_SIZE       (1024)
 //#define MAX_HOST_SIZE      (1024)
-#define QUEUE_FILE_NAME    "/queue"
+#define QUEUE_FILE_NAME    "/todolist"
 #define WEB_DATA_LIMIT     (4096)
 #define FILE_LOCK          "temp_lock"
 #define STATE_READY        (0)
 #define STATE_RUN          (1)
 #define STATE_END          (-1)
+#define URL_LIMIT          (8192)
+#define CHILD_SLEEP_TIME   (1)
+#define PARENT_SLEEP_TIME  (5)
+
 
 typedef struct _OPENSSL {
    SSL_CTX *ctx;
@@ -75,6 +81,8 @@ int create_dir(const char* dir_name);
 int create_socket(const char hostname[]);
 int openSSL_connect(const char host[], _OPENSSL *SSL);
 int openSSL_close(_OPENSSL *SSL);
+int parent_func(int process_count, int *child_pid, int *child_state, char *todolist_fname);
+void sub_quit_signal_handle(int sig);
 
 
 #endif
