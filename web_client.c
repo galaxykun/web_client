@@ -1,19 +1,32 @@
 #include "web_client.h"
 
 
+char *host_url = NULL;
+
+int   todolist_fd       = 0;
+char  *todolist_fname   = NULL;
+char  add_todolist[URL_LIMIT];
+
+int   disk_hash_lock_fd = 0;
+int   share_mem_lock_fd = 0;
+
+int   *child_state      = NULL;
+char  **child_catch_url = NULL;
+pid_t *child_pid        = NULL;
+
+int   process_count = 5;
+
+
 int main(int argc, char *argv[]){
    int ret_val = 0;
-   char *host_url = NULL;
-   char *add_todolist = NULL;
-   int process_count = 5;
-   char *web_data_dir_name = NULL;
-   int web_data_dir = 0;
-   int todolist_fd = 0;
-   _DISK_HASH dh;
-   int temp_fd = 0;
-   int *child_state = NULL;
-   char **child_catch_url = NULL;
-   char *todolist_fname = NULL;
+
+   int   web_data_dir_num     = 0;
+   char  *web_data_dir_name   = NULL;
+
+   
+
+   
+   
 
    if (argc < 3 || argc > 4){
       printf("parameter error!!\n");
@@ -26,7 +39,7 @@ int main(int argc, char *argv[]){
       process_count = atoi(argv[3]);
    }
 
-   pid_t child_pid[process_count];
+   child_pid = (pid_t*)malloc(process_count * sizeof(pid_t));
 
    host_url = (char*)malloc(strlen(argv[1]) + 1);
    if(!host_url){
@@ -48,13 +61,13 @@ int main(int argc, char *argv[]){
    printf("HOST URL : %s\n", host_url);
  #endif
 
-   add_todolist = (char*)malloc(strlen(argv[1]) + 1);
+   /* add_todolist = (char*)malloc(strlen(argv[1]) + 1);
    if(!add_todolist){
       ret_val = ERR_OUT_OF_MEM;
       printf("add to to do list malloc ERROR!\n", ret_val);
 
       goto ERROR;
-   }
+   } */
 
    to_do_list_url_string_conversion(argv[1], add_todolist);
 
@@ -86,7 +99,7 @@ int main(int argc, char *argv[]){
    web_data_dir_ptr += strlen(output_dir);
    strncpy(web_data_dir_ptr, "/", 1);
    web_data_dir_ptr ++;
-   sprintf(web_data_dir_ptr, "%d", web_data_dir);
+   sprintf(web_data_dir_ptr, "%d", web_data_dir_num);
 
  #ifdef _DEBUG
    printf("web data dir name : %s\n", web_data_dir_name);
@@ -138,10 +151,18 @@ int main(int argc, char *argv[]){
       goto ERROR;
    } */
 
-   temp_fd = open(FILE_LOCK, O_RDWR | O_CREAT | O_TRUNC, 0777);
-   if(temp_fd < 0){
+   disk_hash_lock_fd = open(DISK_HASH_LOCK, O_RDWR | O_CREAT | O_TRUNC | O_SYNC, 0777);
+   if(disk_hash_lock_fd < 0){
       ret_val = errno;
-      printf("temp_fd file open ERROR!\n");
+      printf("disk_hash_lock_fd file open ERROR!\n");
+
+      goto ERROR;
+   }
+
+   share_mem_lock_fd = open(SHARE_MEM_LOCK, O_RDWR | O_CREAT | O_TRUNC, 0777);
+   if(share_mem_lock_fd < 0){
+      ret_val = errno;
+      printf("share_mem_lock_fd file open ERROR!\n");
 
       goto ERROR;
    }
@@ -175,7 +196,7 @@ int main(int argc, char *argv[]){
 
  #ifdef _DEBUG
    _OPENSSL SSL;
-   ret_val = openSSL_connect(host_url, &SSL);
+   ret_val = openSSL_connect(&SSL);
 
    struct timeval tv;
    tv.tv_sec = 3;
@@ -228,18 +249,14 @@ int main(int argc, char *argv[]){
 
    if(index != -1){
       //child do
-      prctl(PR_SET_PDEATHSIG,SIGKILL);
+      child_func(index);
       
+      return SUCCESS;
    }
    else{
       //parent do
-
-      //如果同時有多個子程序掛掉怎麼辦?
-      //signal(SIGCHLD, sub_quit_signal_handle);
-
-      ret_val = parent_func(process_count, child_pid, child_state, todolist_fname);
+      ret_val = parent_func();
       if(ret_val){
-         ret_val = errno;
          printf("parent function ERROR!\n");
 
          goto ERROR;
@@ -255,15 +272,21 @@ int main(int argc, char *argv[]){
       printf("return value : %d\n", ret_val);
    if(host_url)
       free(host_url);
-   if(add_todolist)
-      free(add_todolist);
+   /* if(add_todolist)
+      free(add_todolist); */
    if(todolist_fname)
       free(todolist_fname);
+   if(child_pid)
+      free(child_pid);
    if(todolist_fd > 0)
       close(todolist_fd);
-   if(temp_fd > 0){
-      close(temp_fd);
-      remove(FILE_LOCK);
+   if(disk_hash_lock_fd > 0){
+      close(disk_hash_lock_fd);
+      remove(DISK_HASH_LOCK);
+   }
+   if(share_mem_lock_fd > 0){
+      close(share_mem_lock_fd);
+      remove(SHARE_MEM_LOCK);
    }
    if(web_data_dir_name)
       free(web_data_dir_name);
@@ -369,8 +392,8 @@ int create_dir(const char* dir_name){
    return SUCCESS;
 }
 
-int openSSL_connect(const char host[], _OPENSSL *SSL){
-   if(!host || !SSL){
+int openSSL_connect(_OPENSSL *SSL){
+   if(!SSL){
       return ERR_PARAMETER;
    }
 
@@ -426,10 +449,10 @@ int openSSL_connect(const char host[], _OPENSSL *SSL){
    /* ---------------------------------------------------------- *
    * Make the underlying TCP socket connection                  *
    * ---------------------------------------------------------- */
-   SSL->server = create_socket(host);
+   SSL->server = create_socket();
    if(SSL->server != 0) {
     #ifdef _DEBUG
-      printf("Successfully made the TCP connection to: %s .\n", host);
+      printf("Successfully made the TCP connection to: %s .\n", host_url);
     #endif
    }
 
@@ -441,7 +464,7 @@ int openSSL_connect(const char host[], _OPENSSL *SSL){
    /* ---------------------------------------------------------- *
    * Set to Support TLS SNI extension by Andric                 *
    * ---------------------------------------------------------- */
-   SSL_ctrl(SSL->ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, TLSEXT_NAMETYPE_host_name, (void*)host);
+   SSL_ctrl(SSL->ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, TLSEXT_NAMETYPE_host_name, (void*)host_url);
 
    /* ---------------------------------------------------------- *
    * Try to SSL-connect here, returns 1 for success             *
@@ -449,7 +472,7 @@ int openSSL_connect(const char host[], _OPENSSL *SSL){
    if ((ret = SSL_connect(SSL->ssl)) != 1 ) {
       int err;
     #ifdef _DEBUG
-      printf("Error: Could not build a SSL session to: %s .\n", host);
+      printf("Error: Could not build a SSL session to: %s .\n", host_url);
     #endif
 
       return ERR_SSL_CONNCET;
@@ -470,7 +493,7 @@ int openSSL_connect(const char host[], _OPENSSL *SSL){
    }
    else {
     #ifdef _DEBUG
-      printf("Successfully enabled SSL/TLS session to: %s .\n", host);
+      printf("Successfully enabled SSL/TLS session to: %s .\n", host_url);
     #endif
    }
 
@@ -478,10 +501,10 @@ int openSSL_connect(const char host[], _OPENSSL *SSL){
    return SUCCESS;
 }
 
-int create_socket(const char hostname[]){
-   if(!hostname){
+int create_socket(){
+   /* if(!host_url){
       return ERR_PARAMETER;
-   }
+   } */
 
    int sockfd;
    char portnum[6] = "443";
@@ -491,10 +514,10 @@ int create_socket(const char hostname[]){
    struct sockaddr_in dest_addr;
 
    /* ---------------------------------------------------------- *
-   * if the hostname contains a colon :, we got a port number   *
+   * if the host_url contains a colon :, we got a port number   *
    * ---------------------------------------------------------- */
-   if (tmp_ptr = strchr(hostname, ':')) {
-      // strchr(hostname, ':');
+   if (tmp_ptr = strchr(host_url, ':')) {
+      // strchr(host_url, ':');
       /* the last : starts the port number, if avail, i.e. 8443 */
       strncpy(portnum, tmp_ptr+1,  sizeof(portnum));
       *tmp_ptr = '\0';
@@ -502,9 +525,9 @@ int create_socket(const char hostname[]){
 
    port = atoi(portnum);
 
-   if ((host = gethostbyname(hostname)) == NULL) {
+   if ((host = gethostbyname(host_url)) == NULL) {
       #ifdef _DEBUG
-      printf("Error: Cannot resolve hostname %s .\n", hostname);
+      printf("Error: Cannot resolve host_url %s .\n", host_url);
       #endif
 
       abort();
@@ -531,7 +554,7 @@ int create_socket(const char hostname[]){
    * ---------------------------------------------------------- */
    if(connect(sockfd, (struct sockaddr *) &dest_addr, sizeof(struct sockaddr)) == -1) {
       #ifdef _DEBUG
-      printf("Error: Cannot connect to host %s [%s] on port %d.\n", hostname, tmp_ptr, port);
+      printf("Error: Cannot connect to host %s [%s] on port %d.\n", host_url, tmp_ptr, port);
       #endif
    }
 
@@ -555,20 +578,44 @@ int openSSL_close(_OPENSSL *SSL){
    return SUCCESS;
 }
 
-int parent_func(int process_count, int *child_pid, int *child_state, char *todolist_fname){
-   while(1) {
+void sub_quit_signal_handle(int sig){
+   int status;
+
+   for(int i = 0; i < process_count; i++){
+      if(child_pid[i] != -1 && waitpid(child_pid[i], &status, WNOHANG)){
+         printf("pid : %5d is end, status : %3d, index : %2d\n", child_pid[i], status, i);
+         if(!status){
+            child_pid[i] = -1;
+         }
+         else{
+            child_pid[i] = fork();
+         }
+
+         if(child_pid[i] == 0){
+            child_func(i);
+
+            return;
+         }
+      }
+   }
+
+
+   return;
+}
+
+int parent_func(){
+   signal(SIGCHLD, sub_quit_signal_handle);
+
+   while(1){
+    #ifdef _DEBUG
+      printf("parent sleep...\n");
+    #endif
+   
       sleep(PARENT_SLEEP_TIME);
 
       bool end = TRUE;
 
-      for(int i = 0; i < process_count; i++){
-         if(kill(child_pid[i], SIGSTOP) == -1){
-            i--;
-            printf("pid : %5d, kill SIGSTOP ERROR : %2d !\n", child_pid[i], errno);
-            errno = SUCCESS;
-         }
-      }
-
+      lockf(share_mem_lock_fd, F_LOCK, 0);
       for(int i = 0; i < process_count; i++){
          if(child_state[i] != STATE_READY){
             end = FALSE;
@@ -576,13 +623,13 @@ int parent_func(int process_count, int *child_pid, int *child_state, char *todol
             break;
          }
       }
-
+      
       if(end){
          struct stat info;
          if(stat(todolist_fname, &info)){
-            printf("parent stat ERROR! : %s\n", strerror(errno));
+            printf("parent stat ERROR! : %s %d\n", strerror(errno), errno);
 
-            return ERR_TODOLIST;
+            return ERR_STAT;
          }
 
          if(!info.st_size){
@@ -591,33 +638,161 @@ int parent_func(int process_count, int *child_pid, int *child_state, char *todol
             }
          }
       }
-
-      for(int i = 0; i < process_count; i++){
-         if(kill(child_pid[i], SIGCONT) == -1){
-            i--;
-            printf("pid : %5d, kill SIGCONT ERROR : %2d !\n", child_pid[i], errno);
-            errno = SUCCESS;
-         }
-      }
+      lockf(share_mem_lock_fd, F_ULOCK, 0);
 
       if(end){
          break;
       }
    }
 
-
    return SUCCESS;
 }
 
-//*************************//
-/* void sub_quit_signal_handle(int sig){
-   int status;
-   //获取退出的那个子进程的状态
-   int quit_pid = //wait(&status);
-   printf("sub process %d quit, exit status %d\n", quit_pid, status);
+int child_func(int index){
+   int ret_val = SUCCESS;
+   _DISK_HASH dh;
+   
+   prctl(PR_SET_PDEATHSIG,SIGKILL);
 
-   //新创建一个子进程
-   pid_t pid = fork();
-     if( 0 == pid)
-         ChildCycle();
-} */
+   _OPENSSL SSL;
+   ret_val = openSSL_connect(&SSL);
+   if(ret_val){
+      printf("child pid : %5d, openssl connect ERROR! return : %2d\n", getpid(), ret_val);
+
+      exit(ret_val);
+   }
+
+   
+   while(1){
+      sleep(1);
+      char *todolist_buf      = NULL;
+      char *todolist_buf_ptr  = NULL;
+      //add_todolist[URL_LIMIT - 1] = '\0';
+
+      lockf(share_mem_lock_fd, F_LOCK, 0);
+      if(child_state[index] == STATE_END){
+         lockf(share_mem_lock_fd, F_ULOCK, 0);
+
+         break;
+      }
+      lockf(share_mem_lock_fd, F_ULOCK, 0);
+      
+      child_state[index] = STATE_RUN;
+      
+      lockf(todolist_fd, F_LOCK, 0);
+      struct stat info;
+      if(stat(todolist_fname, &info)){
+         printf("to do list file ERROR! retrun : %2d, %s .\n", errno, strerror(errno));
+
+         exit(errno);
+      }
+
+      if(!info.st_size){
+         lockf(todolist_fd, F_ULOCK, 0);
+         child_state[index] = STATE_READY;
+
+         continue;
+      }
+      else{
+         todolist_buf = (char*)malloc(info.st_size * sizeof(char));
+         if(!todolist_buf){
+            printf("to do list buffer malloc ERROR! return : %2d, %s .\n", errno, strerror(errno));
+
+            lockf(todolist_fd, F_ULOCK, 0);
+            child_state[index] = STATE_READY;
+            free(todolist_buf);
+
+            continue;
+         }
+
+         lseek(todolist_fd, SEEK_SET, 0);
+         if(info.st_size != read(todolist_fd, todolist_buf, info.st_size)){
+            printf("to do list read ERROR! return : %2d, %s .\n", errno, strerror(errno));
+
+            lockf(todolist_fd, F_ULOCK, 0);
+            child_state[index] = STATE_READY;
+            free(todolist_buf);
+
+            continue;
+         }
+         todolist_buf_ptr = todolist_buf;
+
+         bool find_url = TRUE;
+         while(find_url){
+            char *temp_chr = strchr(todolist_buf_ptr, '\n');
+            if(!temp_chr){
+               todolist_buf_ptr = NULL;
+
+               break;
+            }
+            
+            *temp_chr = '\0';
+            strncpy(add_todolist, todolist_buf_ptr, strlen(todolist_buf_ptr) + 1);
+            todolist_buf_ptr = temp_chr + 1;
+            if(todolist_buf_ptr > todolist_buf + info.st_size){
+               todolist_buf_ptr = NULL;
+
+               break;
+            }
+
+            lockf(disk_hash_lock_fd, F_LOCK, 0);
+open_table(&dh);
+            ret_val = find(add_todolist, &dh, NULL);
+            if(ret_val == NOT_FOUND){
+               find_url = FALSE;
+            }
+            else if(ret_val){
+               printf("disk hash find ERROR! return : %d\n", ret_val);
+
+               lockf(disk_hash_lock_fd, F_ULOCK, 0);
+               lockf(todolist_fd, F_ULOCK, 0);
+
+               exit(ret_val);
+            }
+            else{
+               printf("URL : %s EXIST!\n", add_todolist);
+            }
+close_table(&dh);
+            lockf(disk_hash_lock_fd, F_ULOCK, 0);
+         }
+
+         if(!todolist_buf_ptr){
+            ftruncate(todolist_fd, 0);
+
+            lockf(todolist_fd, F_ULOCK, 0);
+            child_state[index] = STATE_READY;
+            free(todolist_buf);
+
+            continue;
+         }
+
+         lseek(todolist_fd, SEEK_SET, 0);
+         if(strlen(todolist_buf_ptr) != write(todolist_fd, todolist_buf_ptr, strlen(todolist_buf_ptr))){
+            printf("to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
+
+            lockf(todolist_fd, F_ULOCK, 0);
+            child_state[index] = STATE_READY;
+            free(todolist_buf);
+
+            continue;
+         }
+         lockf(todolist_fd, F_ULOCK, 0);
+         free(todolist_buf);
+      }
+
+      lockf(disk_hash_lock_fd, F_LOCK, 0);
+open_table(&dh);
+      ret_val = add(add_todolist, &index, sizeof(int), TYPE_INT, &dh);
+      if(ret_val){
+         printf("disk hash add ERROR! return : %d\n", ret_val);
+         lockf(disk_hash_lock_fd, F_ULOCK, 0);
+
+         exit(ret_val);
+      }
+close_table(&dh);
+      lockf(disk_hash_lock_fd, F_ULOCK, 0);
+   }
+
+printf(".....\n");
+}
+

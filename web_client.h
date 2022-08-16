@@ -49,7 +49,7 @@
 #define ERR_CHILD          ERR_BASE - 11
 #define ERR_SSL_CONNCET    ERR_BASE - 12
 #define ERR_URL            ERR_BASE - 13
-#define ERR_TODOLIST       ERR_BASE - 14
+#define ERR_STAT           ERR_BASE - 14
 
 #define NOT_FOUND          ERR_BASE - 100
 
@@ -57,7 +57,8 @@
 //#define MAX_HOST_SIZE      (1024)
 #define QUEUE_FILE_NAME    "/todolist"
 #define WEB_DATA_LIMIT     (4096)
-#define FILE_LOCK          "temp_lock"
+#define DISK_HASH_LOCK     "disk_hash_lock"
+#define SHARE_MEM_LOCK     "share_mem_lock"
 #define STATE_READY        (0)
 #define STATE_RUN          (1)
 #define STATE_END          (-1)
@@ -78,11 +79,11 @@ typedef struct _OPENSSL {
 int HOST_string_conversion(const char original[], const char new[]);
 int to_do_list_url_string_conversion(const char original[], const char new[]);
 int create_dir(const char* dir_name);
-int create_socket(const char hostname[]);
-int openSSL_connect(const char host[], _OPENSSL *SSL);
+int create_socket();
+int openSSL_connect(_OPENSSL *SSL);
 int openSSL_close(_OPENSSL *SSL);
-int parent_func(int process_count, int *child_pid, int *child_state, char *todolist_fname);
+int parent_func();
 void sub_quit_signal_handle(int sig);
-
+int child_func(int index);
 
 #endif
