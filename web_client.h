@@ -50,21 +50,25 @@
 #define ERR_SSL_CONNCET    ERR_BASE - 12
 #define ERR_URL            ERR_BASE - 13
 #define ERR_STAT           ERR_BASE - 14
+#define ERR_OPEN_DIR       ERR_BASE - 15
 
 #define NOT_FOUND          ERR_BASE - 100
+#define REACH_DATA_LIMIT   ERR_BASE - 101
 
 //#define MAX_URL_SIZE       (1024)
 //#define MAX_HOST_SIZE      (1024)
 #define QUEUE_FILE_NAME    "/todolist"
 #define WEB_DATA_LIMIT     (4096)
-#define DISK_HASH_LOCK     "disk_hash_lock"
-#define SHARE_MEM_LOCK     "share_mem_lock"
+#define DIR_TEMP           "temp"
+#define DISK_HASH_LOCK     "temp/disk_hash_lock"
+#define SHARE_MEM_LOCK     "temp/share_mem_lock"
 #define STATE_READY        (0)
 #define STATE_RUN          (1)
 #define STATE_END          (-1)
-#define URL_LIMIT          (8192)
+#define URL_LIMIT          (0xFFFF)
 #define CHILD_SLEEP_TIME   (1)
 #define PARENT_SLEEP_TIME  (5)
+#define SOCKET_LEN         (0xFFFF)
 
 
 typedef struct _OPENSSL {
@@ -73,7 +77,23 @@ typedef struct _OPENSSL {
    int server;
 } _OPENSSL;
 
+char *host_url = NULL;
 
+int   todolist_fd       = 0;
+char  *todolist_fname   = NULL;
+char  add_todolist[URL_LIMIT];
+
+int   disk_hash_lock_fd = 0;
+int   share_mem_lock_fd = 0;
+
+int   web_data_dir_num     = 0;
+char  *web_data_dir_name   = NULL;
+
+int   *child_state      = NULL;
+char  **child_catch_url = NULL;
+pid_t *child_pid        = NULL;
+
+int   process_count = 5;
 
 
 int HOST_string_conversion(const char original[], const char new[]);
@@ -85,5 +105,10 @@ int openSSL_close(_OPENSSL *SSL);
 int parent_func();
 void sub_quit_signal_handle(int sig);
 int child_func(int index);
+int get_todolist_url(_DISK_HASH *dh);
+int check_dir_num();
+int setandsend_request(_OPENSSL *SSL, char *request);
+int accept_response(_OPENSSL *SSL, char *response);
+int open_web_data_file(int index, int data_count, int *data_fd);
 
 #endif
