@@ -14,7 +14,7 @@
 #define BLOCK_SIZE         1 << 13
 #define BLOCK_TOTAL_SIZE   sizeof(long)
 #define NEXT_SIZE          sizeof(long)
-#define TABLE_NUMBER       10000019
+#define TABLE_NUMBER       1000019
 #define TABLE_SIZE         TABLE_NUMBER * NEXT_SIZE
 
 #define FNV_prime          16777619
@@ -42,9 +42,19 @@
 #define ERR_PARAMETER      ERR_BASE - 7
 #define ERR_RENAME         ERR_BASE - 8
 #define ERR_CLOSE          ERR_BASE - 9
+#define ERR_FUNC           ERR_BASE - 10
+
+#define ERR_CHILD          ERR_BASE - 11
+#define ERR_SSL_CONNCET    ERR_BASE - 12
+#define ERR_URL            ERR_BASE - 13
+#define ERR_STAT           ERR_BASE - 14
+#define ERR_OPEN_DIR       ERR_BASE - 15
+#define ERR_OUT_OF_MEM     ERR_BASE - 16
+#define ERR_POINT          ERR_BASE - 17
 
 #define NOT_FOUND          ERR_BASE - 100
-
+#define REACH_DATA_LIMIT   ERR_BASE - 101
+#define TODOLIST_ZERO      ERR_BASE - 102
 
 typedef struct _DATA{
    size_t   total_size;

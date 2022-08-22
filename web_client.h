@@ -33,8 +33,7 @@
 
 #define SUCCESS            0
 #define ERR_BASE           0
-#define ERR_OUT_OF_MEM     ERR_BASE - 1
-#define ERR_POINT          ERR_BASE - 2
+
 #define ERR_DIR            ERR_BASE - 1
 #define ERR_WRITE          ERR_BASE - 2
 #define ERR_OPEN_FILE      ERR_BASE - 3
@@ -51,17 +50,22 @@
 #define ERR_URL            ERR_BASE - 13
 #define ERR_STAT           ERR_BASE - 14
 #define ERR_OPEN_DIR       ERR_BASE - 15
+#define ERR_OUT_OF_MEM     ERR_BASE - 16
+#define ERR_POINT          ERR_BASE - 17
 
 #define NOT_FOUND          ERR_BASE - 100
 #define REACH_DATA_LIMIT   ERR_BASE - 101
+#define TODOLIST_ZERO      ERR_BASE - 102
+
 
 //#define MAX_URL_SIZE       (1024)
 //#define MAX_HOST_SIZE      (1024)
-#define QUEUE_FILE_NAME    "/todolist"
+#define QUEUE_FILE_NAME    "/todolist.txt"
 #define WEB_DATA_LIMIT     (4096)
 #define DIR_TEMP           "temp"
 #define DISK_HASH_LOCK     "temp/disk_hash_lock"
 #define SHARE_MEM_LOCK     "temp/share_mem_lock"
+#define TODOLIST_LOCK      "temp/todolist_lock"
 #define STATE_READY        (0)
 #define STATE_RUN          (1)
 #define STATE_END          (-1)
@@ -85,6 +89,7 @@ char  add_todolist[URL_LIMIT];
 
 int   disk_hash_lock_fd = 0;
 int   share_mem_lock_fd = 0;
+int   todolist_lock_fd  = 0;
 
 int   web_data_dir_num     = 0;
 char  *web_data_dir_name   = NULL;
@@ -94,7 +99,9 @@ char  **child_catch_url = NULL;
 pid_t *child_pid        = NULL;
 
 int   process_count = 5;
+int   process_index = -1;
 
+_DISK_HASH dh;
 
 int HOST_string_conversion(const char original[], const char new[]);
 int to_do_list_url_string_conversion(const char original[], const char new[]);
@@ -104,11 +111,15 @@ int openSSL_connect(_OPENSSL *SSL);
 int openSSL_close(_OPENSSL *SSL);
 int parent_func();
 void sub_quit_signal_handle(int sig);
-int child_func(int index);
-int get_todolist_url(_DISK_HASH *dh);
+int child_func();
+int get_todolist_url();
 int check_dir_num();
 int setandsend_request(_OPENSSL *SSL, char *request);
-int accept_response(_OPENSSL *SSL, char *response);
-int open_web_data_file(int index, int data_count, int *data_fd);
+int accept_response(_OPENSSL *SSL, char *response, int data_file_count);
+int open_web_data_file(int data_count, int *data_fd);
+int response_head_handle(const char *response, int *body_len);
+int response_body_handle(const int data_fd);
+int add_todolist_file(char *add);
+int disk_hash_find(const char *find_key);
 
 #endif
