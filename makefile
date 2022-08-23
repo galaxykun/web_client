@@ -1,5 +1,7 @@
 all : web_client DEBUG
 
+restart : clean web_client DEBUG run_debug
+
 web_client:
 	gcc web_client.c -o web_client -lssl -lcrypto
 
