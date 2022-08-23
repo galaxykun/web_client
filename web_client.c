@@ -698,12 +698,13 @@ int child_func(){
    
    while(1){
     #ifdef _DEBUG      
-      if(count++ == 10){
+      if(count++ == 5){
          lockf(share_mem_lock_fd, F_LOCK, 0);
          child_state[process_index] = STATE_READY;
          lockf(share_mem_lock_fd, F_ULOCK, 0);
          break;
       }
+      //getchar();
     #endif
 
       
@@ -1085,31 +1086,31 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
       int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
       switch(ssl_get_ret){
          case SSL_ERROR_NONE:
-            printf("openssl read ERROR! return : SSL_ERROR_NONE\n");
+            printf("first openssl read ERROR! return : SSL_ERROR_NONE\n");
             break;
          case SSL_ERROR_ZERO_RETURN:
-            printf("openssl read ERROR! return : SSL_ERROR_ZERO_RETURN\n");
+            printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN\n");
             break;
          case SSL_ERROR_WANT_READ:
-            printf("openssl read ERROR! return : SSL_ERROR_WANT_READ\n");
+            printf("first openssl read ERROR! return : SSL_ERROR_WANT_READ\n");
             break;
          case SSL_ERROR_WANT_CONNECT:
-            printf("openssl read ERROR! return : SSL_ERROR_WANT_CONNECT\n");
+            printf("first openssl read ERROR! return : SSL_ERROR_WANT_CONNECT\n");
             break;
          case SSL_ERROR_WANT_ACCEPT:
-            printf("openssl read ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
+            printf("first openssl read ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
             break;
          case SSL_ERROR_WANT_X509_LOOKUP:
-            printf("openssl read ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
+            printf("first openssl read ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
             break;
          case SSL_ERROR_SYSCALL:
-            printf("openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
+            printf("first openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
             break;
          case SSL_ERROR_SSL:
-            printf("openssl read ERROR! return : SSL_ERROR_SSL\n");
+            printf("first openssl read ERROR! return : SSL_ERROR_SSL\n");
             break;
          default :
-            printf("openssl read ERROR! return : ELSE\n");
+            printf("first openssl read ERROR! return : ELSE\n");
             break;
       }
    }
@@ -1331,12 +1332,12 @@ int response_body_handle(const int data_fd){
       }
       a_href_ptr +=  sizeof("href=") - 1;
 
-      if(*a_href_ptr == '\"'){
+      if(*a_href_ptr == '\"' || *a_href_ptr == '\''){
          a_href_ptr++;
       }
 
       char *temp = a_href_ptr;
-      for(; *temp != '\"' && *temp != ' ' && *temp != '>'; temp++);
+      for(; *temp != '\"' && *temp != ' ' && *temp != '>' && *temp != '\''; temp++);
 
       char body_add[URL_LIMIT];
       memset(body_add, 0, URL_LIMIT);
@@ -1356,22 +1357,38 @@ int response_body_handle(const int data_fd){
             }
          }
       }
-      else if(*body_add != '/'){
+      else if(*body_add != '/' && *body_add != '#' && !strstr(body_add, "javascript:")){
          char temp_add[URL_LIMIT];
-         memset(temp_add, 0, URL_LIMIT);
+         temp_add[URL_LIMIT - 1] = 0;
+         //memset(temp_add, 0, URL_LIMIT);
+         char *tail;
 
          temp = body_add;
-         strcpy(temp_add, add_todolist);
-         //strncat(temp_add, "/", URL_LIMIT - strlen(temp_add));
-         strncat(temp_add, temp, URL_LIMIT - strlen(temp_add));
+         tail = strrchr(add_todolist, '/');
+         if(!(*(tail + 1))){
+            strcpy(temp_add, add_todolist);
+         }
+         else{
+            char *i = add_todolist, *j = temp_add;
+            for(; i != tail; i++, j++){
+               *j = *i;
+            }
+            *j++ = *i;
+            *j = 0;
+         }
+         strncat(temp_add, temp, URL_LIMIT - 1 - strlen(temp_add));
          temp = temp_add;
       }
-      else{
+      else if(*body_add == '/'){
          temp = body_add;
+      }
+      else{
+         same_host = FALSE;
       }
 
     #ifdef _DEBUG
       printf("add_todolist : %s .\n", add_todolist);
+      printf("body_add : %s .\n", body_add);
       printf("add to to do list URL : %s .\t same_host : %d\n", temp, same_host);
     #endif
    
@@ -1407,17 +1424,19 @@ int response_body_handle(const int data_fd){
 
 int add_todolist_file(char *add){
    lockf(todolist_lock_fd, F_LOCK, 0);
-   add[strlen(add)] = '\n';
+   int len = strlen(add) < URL_LIMIT - 1 ? strlen(add) : URL_LIMIT - 1;
+   add[len] = '\n';
+   add[len + 1] = '\0';
 
    lseek(todolist_fd, 0, SEEK_END);
-   if(strlen(add) != write(todolist_fd, add, strlen(add))){
+   if(len + 1 != write(todolist_fd, add, len + 1)){
       printf("write to do list file ERROR!\n");
 
       lockf(todolist_lock_fd, F_ULOCK, 0);
       return ERR_WRITE;
    }
 
-   add[strlen(add) - 1] = '\0';
+   add[len] = '\0';
    lockf(todolist_lock_fd, F_ULOCK, 0);
 
    return SUCCESS;
