@@ -7,7 +7,7 @@ int main(int argc, char *argv[]){
       printf("parameter error!!\n");
       printf("./web_client “URL” “Output Directory” [“process count”]\n");
 
-      return SUCCESS;
+      return ERR_PARAMETER;
    }
 
    if(argc == 4){
@@ -199,46 +199,6 @@ int main(int argc, char *argv[]){
       }
       child_catch_url[i][URL_LIMIT] = '\0';
    }
- /* 
- #ifdef _DEBUG
-   _OPENSSL SSL;
-   ret_val = openSSL_connect(&SSL);
-
-   struct timeval tv;
-   tv.tv_sec = 3;
-   tv.tv_usec = 0;
-   setsockopt(SSL.server, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
-
-   char request[0xfff], response[0xfff]; // 請求 與 回應訊息
-   strcpy(request, "GET ");
-   add_todolist[strlen(add_todolist) - 1] = '\0';
-   strcat(request, add_todolist);
-   strcat(request, " HTTP/1.1\r\nHost: ");
-   strcat(request, host_url);
-   strcat(request, "\r\n");
-   strcat(request, "\r\n");
-
-   // 格式化輸出請求訊息
-   printf("----------\nRequest:\n----------\n%s\n", request);
-   // 發送請求
-   int ret = SSL_write(SSL.ssl, request, strlen(request));
-   if (ret)
-      SSL_get_error(SSL.ssl, ret);
-
-
-   // 接收回應
-   printf("----------\nResponse:\n----------\n");
-   ret = 0;
-   ret = SSL_read(SSL.ssl, response, (0xfff - 1));
-   if(ret <= 0){
-      printf("ERROR!!! : num %d\n", ret);
-   }
-   response[0xfff] = '\0';
-   printf("%s\n", response);
-
-   ret_val = openSSL_close(&SSL);
- #endif
- */
 
    for(int i = 0; i < process_count; i++){
       child_pid[i] = fork();
@@ -255,6 +215,10 @@ int main(int argc, char *argv[]){
 
    if(process_index != -1){
       //child do
+    #ifdef _DEBUG
+      printf("child_func run!\n");
+    #endif
+
       child_func();
 
       return SUCCESS;
@@ -625,12 +589,16 @@ void sub_quit_signal_handle(int sig){
             }
             lockf(disk_hash_lock_fd, F_ULOCK, 0);
 
-            if(ret = add_todolist_file(temp)){
+            if(ret = add_todolist_file(child_catch_url[i])){
                printf("sub_quit_signal_handle add_todolist_file ERROR! return : %d\n", ret);
                i--;
 
                continue;
             }
+
+            lockf(share_mem_lock_fd, F_LOCK, 0);
+            child_state[i] = STATE_RUN;
+            lockf(share_mem_lock_fd, F_ULOCK, 0);
 
             child_pid[i] = fork();
          }
@@ -737,7 +705,7 @@ int child_func(){
 
    while(1){
     #ifdef _DEBUG
-      if(count++ == 5){
+      if(count++ == 1){
          lockf(share_mem_lock_fd, F_LOCK, 0);
          child_state[process_index] = STATE_READY;
          lockf(share_mem_lock_fd, F_ULOCK, 0);
@@ -1233,9 +1201,17 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
        #endif
       }
       else{
-         if(strstr(response, "\r\n0\r\n\r\n")){
-            break;
+         char *temp;
+         if(temp = strstr(response, "0\r\n\r\n")){
+            if(temp == response || *(temp - 1) == '\n'){
+             #ifdef _DEBUG
+               printf("write ... body len : %d\n", body_len);
+             #endif
+
+               break;
+            }
          }
+
       }
 
        #ifdef _DEBUG
@@ -1265,7 +1241,7 @@ int response_head_handle(const char *response, int *body_len){
    if(resp_status >= 100 && resp_status < 200){
       *body_len = 0;
    }
-   else if(resp_status >= 200 && resp_status < 300){      
+   else if(resp_status >= 200 && resp_status < 300){
       *body_len = 0;
       if(resp_ptr = strstr(response, "Content-Length:")){
          *body_len = atoi((resp_ptr + sizeof("Content-Length:")));
@@ -1346,12 +1322,13 @@ int response_head_handle(const char *response, int *body_len){
 int response_body_handle(const int data_fd){
    int ret = 0;
    int  data_size = lseek(data_fd, 0, SEEK_END);
-   char *data_buf = (char*)calloc(data_size + 1, sizeof(char));
+   char *data_buf = (char*)malloc(data_size + 1, sizeof(char));
    if(!data_buf){
       printf("response read data ERROR! return : %s", strerror(errno));
 
       return ERR_OUT_OF_MEM;
    }
+   data_buf[data_size] = 0;
 
    lseek(data_fd, 0, SEEK_SET);
    if(data_size != read(data_fd, data_buf, data_size)){
@@ -1372,7 +1349,7 @@ int response_body_handle(const int data_fd){
       }
 
       char *temp = a_href_ptr;
-      for(; *temp != '\"' && *temp != ' ' && *temp != '>' && *temp != '\''; temp++);
+      for(; *temp && *temp != '\"' && *temp != ' ' && *temp != '>' && *temp != '\''; temp++);
 
       char body_add[URL_LIMIT];
       memset(body_add, 0, URL_LIMIT);
@@ -1394,7 +1371,6 @@ int response_body_handle(const int data_fd){
       else if(*body_add != '/' && *body_add != '#' && !strstr(body_add, "javascript:")){
          char temp_add[URL_LIMIT];
          temp_add[URL_LIMIT - 1] = 0;
-         //memset(temp_add, 0, URL_LIMIT);
          char *tail;
 
          temp = body_add;
@@ -1434,7 +1410,6 @@ int response_body_handle(const int data_fd){
 
                exit(ret);
             }
-
          }
          else if(ret){
             printf("response_body_handle disk hash find ERROR! return : %d\n", ret);
@@ -1499,4 +1474,44 @@ int disk_hash_find(const char *find_key){
    return find_ret;
 }
 
+int URL_percent_encoding(const char original[], const char new[]){
+   if(!original || !new){
+      return ERR_PARAMETER;
+   }
+
+   char *optr = (char*)original;
+   char *nptr = (char*)new;
+   char arr[] = "0123456789ABCDEF";
+
+   /******************************************
+   *  0  ~  9	    A ~ Z		 a ~ z         *
+   * 48  ~  57	65 ~ 90		97 ~ 122          *
+   *                                         *
+   * !	#	&	'	(	)	*	+	,	-	.	/     *
+   * 33	35	38	39	40	41	42	43	44	45	46	47    *
+   *                                         *
+   * :	;	=	?	@  [	]	_	~              *
+   * 58	59	61	63	64 91	93	95	126            *
+   *******************************************/
+
+   for(; *optr != 0; optr++, nptr++){
+      if(*optr == 33 || *optr == 35 || *optr == 38 || *optr == 39 || *optr == 40 || *optr == 41 ||
+         *optr == 42 || *optr == 43 || *optr == 44 || *optr == 45 || *optr == 46 || *optr == 47 ||
+         *optr == 58 || *optr == 59 || *optr == 61 || *optr == 63 || *optr == 64 || *optr == 91 ||
+         *optr == 93 || *optr == 95 || *optr == 126 || (*optr >= 48 && *optr <= 57) ||
+         (*optr >= 65 && *optr <= 90) || (*optr >= 97 && *optr <= 122)){
+
+         *nptr = *optr;
+      }
+      else{
+         *nptr++ = '%';
+         *nptr++ = arr[(*optr) / 16];
+         *nptr = arr[(*optr) % 16];
+      }
+   }
+   *nptr = 0;
+
+
+   return SUCCESS;
+}
 
