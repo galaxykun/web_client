@@ -33,7 +33,11 @@ int main(int argc, char *argv[]){
    ret_val = HOST_string_conversion(argv[1], host_url);
    if(ret_val){
       ret_val = ERR_URL;
+      printf("URL ERROR! Please use https .\n", ret_val);
+
+    #ifdef _DEBUG
       printf("HOST_string_conversion ERROR! return : %d\n", ret_val);
+    #endif
 
       goto ERROR;
    }
@@ -287,12 +291,12 @@ int HOST_string_conversion(const char original[], const char new[]){
    char *optr = (char*)original;
    char *nptr = (char*)new;
 
-   optr = strstr(original, "://");
+   optr = strstr(original, "https://");
    if(!optr){
       return ERR_URL;
    }
 
-   optr += strlen("://");
+   optr += strlen("https://");
    for (; *optr != '/'; optr++, nptr++) {
       *nptr = *optr;
    }
@@ -560,6 +564,9 @@ void sub_quit_signal_handle(int sig){
          if(!status){
             child_pid[i] = -1;
          }
+         else if(!*child_catch_url[i]){
+            child_pid[i] = fork();
+         }
          else{
             lockf(disk_hash_lock_fd, F_LOCK, 0);
             int ret = 0;
@@ -705,7 +712,7 @@ int child_func(){
 
    while(1){
     #ifdef _DEBUG
-      if(count++ == 2){
+      if(count++ == -1){
          lockf(share_mem_lock_fd, F_LOCK, 0);
          child_state[process_index] = STATE_READY;
          lockf(share_mem_lock_fd, F_ULOCK, 0);
@@ -1025,50 +1032,63 @@ int setandsend_request(_OPENSSL *SSL, char *request){
    printf(  "****************************************\n\n");
  #endif
 
-   ret = SSL_write(SSL->ssl, request, strlen(request));
-   if(ret <= 0){
-      int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
+   bool want_write = TRUE;
+   while(want_write){
+      want_write = FALSE;
 
-      /* if(ssl_get_ret == SSL_ERROR_NONE){
-         printf("openssl write ERROR! return : SSL_ERROR_NONE\n");
-      }
-      else if(ssl_get_ret == SSL_ERROR_ZERO_RETURN){
-         printf("openssl write ERROR! return : SSL_ERROR_ZERO_RETURN\n");
-      }
-      else if(ssl_get_ret == SSL_ERROR_WANT_READ || ssl_get_ret == SSL_ERROR_WANT_WRITE){
-         printf("openssl write ERROR! return : SSL_ERROR_WANT_READ || ssl_get_ret == SSL_ERROR_WANT_WRITE\n");
-      }
-      else{
-         printf("openssl write ERROR! return : ELSE\n");
-      } */
-      switch(ssl_get_ret){
-         case SSL_ERROR_NONE:
-            printf("openssl write ERROR! return : SSL_ERROR_NONE\n");
-            break;
-         case SSL_ERROR_ZERO_RETURN:
-            printf("openssl write ERROR! return : SSL_ERROR_ZERO_RETURN\n");
-            break;
-         case SSL_ERROR_WANT_WRITE:
-            printf("openssl write ERROR! return : SSL_ERROR_WANT_READ\n");
-            break;
-         case SSL_ERROR_WANT_CONNECT:
-            printf("openssl write ERROR! return : SSL_ERROR_WANT_CONNECT\n");
-            break;
-         case SSL_ERROR_WANT_ACCEPT:
-            printf("openssl write ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
-            break;
-         case SSL_ERROR_WANT_X509_LOOKUP:
-            printf("openssl write ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
-            break;
-         case SSL_ERROR_SYSCALL:
-            printf("openssl write ERROR! return : SSL_ERROR_SYSCALL\n");
-            break;
-         case SSL_ERROR_SSL:
-            printf("openssl write ERROR! return : SSL_ERROR_SSL\n");
-            break;
-         default :
-            printf("openssl write ERROR! return : ELSE\n");
-            break;
+      ret = SSL_write(SSL->ssl, request, strlen(request));
+      if(ret <= 0){
+         int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
+
+         switch(ssl_get_ret){
+            case SSL_ERROR_NONE:
+               printf("openssl write ERROR! return : SSL_ERROR_NONE\n");
+               break;
+            case SSL_ERROR_ZERO_RETURN:
+               printf("openssl write ERROR! return : SSL_ERROR_ZERO_RETURN\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
+               break;
+            case SSL_ERROR_WANT_WRITE:
+               printf("openssl write ERROR! return : SSL_ERROR_WANT_READ\n");
+               want_write = TRUE;
+
+               break;
+            case SSL_ERROR_WANT_CONNECT:
+               printf("openssl write ERROR! return : SSL_ERROR_WANT_CONNECT\n");
+               want_write = TRUE;
+
+               break;
+            case SSL_ERROR_WANT_ACCEPT:
+               printf("openssl write ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
+               want_write = TRUE;
+
+               break;
+            case SSL_ERROR_WANT_X509_LOOKUP:
+               printf("openssl write ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
+               want_write = TRUE;
+
+               break;
+            case SSL_ERROR_SYSCALL:
+               printf("openssl write ERROR! return : SSL_ERROR_SYSCALL\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
+               break;
+            case SSL_ERROR_SSL:
+               printf("openssl write ERROR! return : SSL_ERROR_SSL\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
+               break;
+            default :
+               printf("openssl write ERROR! return : ELSE\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
+               break;
+         }
       }
    }
 
@@ -1091,44 +1111,70 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
    printf("\n********** pid : %2d Response: **********\n", process_index);
  #endif
 
-   memset(response, 0, SOCKET_LEN);
-   ret = SSL_read(SSL->ssl, response, SOCKET_LEN);
-   if(ret <= 0){
-      int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
-      switch(ssl_get_ret){
-         case SSL_ERROR_NONE:
-            printf("first openssl read ERROR! return : SSL_ERROR_NONE\n");
-            break;
-         case SSL_ERROR_ZERO_RETURN:
-            printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN\n");
-            break;
-         case SSL_ERROR_WANT_READ:
-            printf("first openssl read ERROR! return : SSL_ERROR_WANT_READ\n");
-            break;
-         case SSL_ERROR_WANT_CONNECT:
-            printf("first openssl read ERROR! return : SSL_ERROR_WANT_CONNECT\n");
-            break;
-         case SSL_ERROR_WANT_ACCEPT:
-            printf("first openssl read ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
-            break;
-         case SSL_ERROR_WANT_X509_LOOKUP:
-            printf("first openssl read ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
-            break;
-         case SSL_ERROR_SYSCALL:
-            printf("first openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
-            break;
-         case SSL_ERROR_SSL:
-            printf("first openssl read ERROR! return : SSL_ERROR_SSL\n");
-            break;
-         default :
-            printf("first openssl read ERROR! return : ELSE\n");
-            break;
+   bool want_read = TRUE;
+   while(want_read){
+      want_read = FALSE;
+      memset(response, 0, SOCKET_LEN);
+
+      ret = SSL_read(SSL->ssl, response, SOCKET_LEN);
+      if(ret <= 0){
+         int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
+         switch(ssl_get_ret){
+            case SSL_ERROR_NONE:
+               printf("first openssl read ERROR! return : SSL_ERROR_NONE\n");
+               break;
+            case SSL_ERROR_ZERO_RETURN:
+               printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
+               break;
+            case SSL_ERROR_WANT_READ:
+               printf("first openssl read ERROR! return : SSL_ERROR_WANT_READ\n");
+               want_read = TRUE;
+
+               break;
+            case SSL_ERROR_WANT_CONNECT:
+               printf("first openssl read ERROR! return : SSL_ERROR_WANT_CONNECT\n");
+               want_read = TRUE;
+
+               break;
+            case SSL_ERROR_WANT_ACCEPT:
+               printf("first openssl read ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
+               want_read = TRUE;
+
+               break;
+            case SSL_ERROR_WANT_X509_LOOKUP:
+               printf("first openssl read ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
+               want_read = TRUE;
+
+               break;
+            case SSL_ERROR_SYSCALL:
+               printf("first openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
+               break;
+            case SSL_ERROR_SSL:
+               printf("first openssl read ERROR! return : SSL_ERROR_SSL\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
+               break;
+            default :
+               printf("first openssl read ERROR! return : ELSE\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
+               break;
+         }
       }
    }
 
  #ifdef _DEBUG
    //printf("%s\n", response);
  #endif
+
    if(ret = response_head_handle(response, &body_len)){
       printf("response head handle ERROR! return : %d .\n", ret);
 
@@ -1163,31 +1209,51 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
          int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
          switch(ssl_get_ret){
             case SSL_ERROR_NONE:
-               printf("openssl read ERROR! return : SSL_ERROR_NONE\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_NONE\n");
                break;
             case SSL_ERROR_ZERO_RETURN:
-               printf("openssl read ERROR! return : SSL_ERROR_ZERO_RETURN\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
                break;
             case SSL_ERROR_WANT_READ:
-               printf("openssl read ERROR! return : SSL_ERROR_WANT_READ\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_WANT_READ\n");
+               continue;
+
                break;
             case SSL_ERROR_WANT_CONNECT:
-               printf("openssl read ERROR! return : SSL_ERROR_WANT_CONNECT\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_WANT_CONNECT\n");
+               continue;
+
                break;
             case SSL_ERROR_WANT_ACCEPT:
-               printf("openssl read ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
+               continue;
+
                break;
             case SSL_ERROR_WANT_X509_LOOKUP:
-               printf("openssl read ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
+               continue;
+
                break;
             case SSL_ERROR_SYSCALL:
-               printf("openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
                break;
             case SSL_ERROR_SSL:
-               printf("openssl read ERROR! return : SSL_ERROR_SSL\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_SSL\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
                break;
             default :
-               printf("openssl read ERROR! return : ELSE\n");
+               printf("first openssl read ERROR! return : ELSE\n");
+               openSSL_close(SSL);
+
+               exit(ERR_OPENSSL);
                break;
          }
       }
@@ -1213,7 +1279,7 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
          if(temp = strstr(response, "0\r\n\r\n")){
             if(temp == response || *(temp - 1) == '\n'){
              #ifdef _DEBUG
-               printf("write ... body len : %d\n", body_len);
+               printf("write ... body len : chunked\n");
              #endif
 
                break;
@@ -1229,6 +1295,13 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
    }
 
    response_body_handle(data_fd);
+
+   if(close_header){
+      *child_catch_url[process_index] = 0;
+
+      exit(ERR_SSL_CONNCET);
+   }
+
 
    return SUCCESS;
 }
@@ -1323,6 +1396,9 @@ int response_head_handle(const char *response, int *body_len){
       *body_len -= strlen(resp_ptr);
    }
 
+   if(strstr(response, "Connection: close")){
+      close_header = TRUE;
+   }
 
    return SUCCESS;
 }

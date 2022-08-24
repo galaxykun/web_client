@@ -52,6 +52,7 @@
 #define ERR_OPEN_DIR       ERR_BASE - 15
 #define ERR_OUT_OF_MEM     ERR_BASE - 16
 #define ERR_POINT          ERR_BASE - 17
+#define ERR_OPENSSL        ERR_BASE - 18
 
 #define NOT_FOUND          ERR_BASE - 100
 #define REACH_DATA_LIMIT   ERR_BASE - 101
@@ -100,6 +101,8 @@ pid_t *child_pid        = NULL;
 
 int   process_count = 5;
 int   process_index = -1;
+
+bool close_header = FALSE;
 
 _DISK_HASH dh;
 
