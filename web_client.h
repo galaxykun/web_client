@@ -121,5 +121,6 @@ int response_head_handle(const char *response, int *body_len);
 int response_body_handle(const int data_fd);
 int add_todolist_file(char *add);
 int disk_hash_find(const char *find_key);
+int URL_percent_encoding(char original[]);
 
 #endif

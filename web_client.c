@@ -705,7 +705,7 @@ int child_func(){
 
    while(1){
     #ifdef _DEBUG
-      if(count++ == 1){
+      if(count++ == 2){
          lockf(share_mem_lock_fd, F_LOCK, 0);
          child_state[process_index] = STATE_READY;
          lockf(share_mem_lock_fd, F_ULOCK, 0);
@@ -884,6 +884,14 @@ int get_todolist_url(){
             goto ERROR;
          }
          ftruncate(todolist_fd, strlen(todolist_buf_ptr));
+      }
+   }
+
+   if(*add_todolist != '/'){
+      char *temp = add_todolist;
+      for(; *temp != '/'; temp++);
+      for(int i = 0; *(temp - 1) != '\0'; temp++, i++){
+         add_todolist[i] = *temp;
       }
    }
 
@@ -1322,7 +1330,7 @@ int response_head_handle(const char *response, int *body_len){
 int response_body_handle(const int data_fd){
    int ret = 0;
    int  data_size = lseek(data_fd, 0, SEEK_END);
-   char *data_buf = (char*)malloc(data_size + 1, sizeof(char));
+   char *data_buf = (char*)malloc(data_size + 1 * sizeof(char));
    if(!data_buf){
       printf("response read data ERROR! return : %s", strerror(errno));
 
@@ -1432,6 +1440,13 @@ int response_body_handle(const int data_fd){
 }
 
 int add_todolist_file(char *add){
+   int ret_val = URL_percent_encoding(add);
+   if(ret_val){
+      printf("URL_percent_encoding ERROR! retunr : %d\n", ret_val);
+
+      return ret_val;
+   }
+
    lockf(todolist_lock_fd, F_LOCK, 0);
    int len = strlen(add) < URL_LIMIT - 1 ? strlen(add) : URL_LIMIT - 1;
    add[len] = '\n';
@@ -1474,27 +1489,45 @@ int disk_hash_find(const char *find_key){
    return find_ret;
 }
 
-int URL_percent_encoding(const char original[], const char new[]){
-   if(!original || !new){
+int URL_percent_encoding(char original[]){
+   if(!original){
       return ERR_PARAMETER;
    }
 
-   char *optr = (char*)original;
-   char *nptr = (char*)new;
+   char *optr = original;
+   char new[URL_LIMIT];
+   char *nptr = new;
    char arr[] = "0123456789ABCDEF";
 
    /******************************************
-   *  0  ~  9	    A ~ Z		 a ~ z         *
-   * 48  ~  57	65 ~ 90		97 ~ 122          *
+   * 0   ~  9     A  ~  Z     a  ~  z        *
+   * 48  ~  57    65 ~  90    97 ~  122      *
    *                                         *
-   * !	#	&	'	(	)	*	+	,	-	.	/     *
-   * 33	35	38	39	40	41	42	43	44	45	46	47    *
+   * !   #  &  '  (  )  *  +  ,  -  .  /     *
+   * 33  35 38 39 40 41 42 43 44 45 46 47    *
    *                                         *
-   * :	;	=	?	@  [	]	_	~              *
-   * 58	59	61	63	64 91	93	95	126            *
+   * :   ;  =  ?  @  [  ]  _  ~              *
+   * 58  59 61 63 64 91 93 95 126            *
    *******************************************/
 
-   for(; *optr != 0; optr++, nptr++){
+   for(int i = 0; *optr != 0 && i < (URL_LIMIT - 1); optr++, nptr++, i++){
+      bool judge = FALSE;
+
+      if(*optr == '%'){
+         char temp[] = "abcdef";
+
+         for(int i = 0; i < strlen(arr), !judge; i++){
+            if(arr[i] == *(optr + 1)){
+               judge = TRUE;
+            }
+         }
+         for(int i = 0; i < strlen(temp), !judge; i++){
+            if(temp[i] == *(optr + 1)){
+               judge = TRUE;
+            }
+         }
+      }
+
       if(*optr == 33 || *optr == 35 || *optr == 38 || *optr == 39 || *optr == 40 || *optr == 41 ||
          *optr == 42 || *optr == 43 || *optr == 44 || *optr == 45 || *optr == 46 || *optr == 47 ||
          *optr == 58 || *optr == 59 || *optr == 61 || *optr == 63 || *optr == 64 || *optr == 91 ||
@@ -1503,13 +1536,19 @@ int URL_percent_encoding(const char original[], const char new[]){
 
          *nptr = *optr;
       }
+      else if(judge){
+         *nptr++  = *optr++;
+         *nptr++  = *optr++;
+         *nptr    = *optr;
+      }
       else{
-         *nptr++ = '%';
-         *nptr++ = arr[(*optr) / 16];
-         *nptr = arr[(*optr) % 16];
+         *(nptr++) = '%';
+         *(nptr++) = *optr < 0 ? arr[((*optr + 256) >> 4)] : arr[((*optr) >> 4)];
+         *nptr = *optr < 0 ? arr[((*optr + 256) & 15)] : arr[((*optr) & 15)];
       }
    }
    *nptr = 0;
+   strcpy(original, new);
 
 
    return SUCCESS;
