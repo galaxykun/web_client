@@ -67,6 +67,7 @@
 #define DISK_HASH_LOCK     "temp/disk_hash_lock"
 #define SHARE_MEM_LOCK     "temp/share_mem_lock"
 #define TODOLIST_LOCK      "temp/todolist_lock"
+#define DATA_DIR_LOCK      "temp/data_dir_lock"
 #define STATE_READY        (0)
 #define STATE_RUN          (1)
 #define STATE_END          (-1)
@@ -91,9 +92,11 @@ char  add_todolist[URL_LIMIT];
 int   disk_hash_lock_fd = 0;
 int   share_mem_lock_fd = 0;
 int   todolist_lock_fd  = 0;
+int   data_dir_lock_fd  = 0;
 
-int   web_data_dir_num     = 0;
+int   *web_data_dir_num    = NULL;
 char  *web_data_dir_name   = NULL;
+
 
 int   *child_state      = NULL;
 char  **child_catch_url = NULL;
