@@ -17,7 +17,7 @@ int main(int argc, char *argv[]){
    child_pid = (pid_t*)malloc(process_count * sizeof(pid_t));
    if(!child_pid){
       ret_val = ERR_OUT_OF_MEM;
-      printf("child pid malloc ERROR! retunr : %d\n", ret_val);
+      printf("child pid malloc ERROR! return : %d\n", ret_val);
 
       goto ERROR;
    }
@@ -624,7 +624,7 @@ void sub_quit_signal_handle(int sig){
             }
 
             lockf(share_mem_lock_fd, F_LOCK, 0);
-            child_state[i] = STATE_RUN;
+            child_state[i] = STATE_READY;
             lockf(share_mem_lock_fd, F_ULOCK, 0);
 
             child_pid[i] = fork();
@@ -657,7 +657,7 @@ int parent_func(){
 
       lockf(share_mem_lock_fd, F_LOCK, 0);
       for(int i = 0; i < process_count; i++){
-         if(child_state[i] != STATE_READY){
+         if(child_state[i] == STATE_RUN){
             end = FALSE;
             printf("child : %2d is not ready!\n", i);
             break;
@@ -674,8 +674,15 @@ int parent_func(){
 
          if(!info.st_size){
             for(int i = 0; i < process_count; i++){
-               child_state[i] = STATE_END;  
+               child_state[i] = STATE_END;
             }
+         }
+         else{
+            end = FALSE;
+
+          #ifdef _DEBUG
+            end = TRUE;
+          #endif
          }
       }
       lockf(share_mem_lock_fd, F_ULOCK, 0);
@@ -684,8 +691,9 @@ int parent_func(){
          break;
       }
    }
+
  #ifdef _DEBUG
-   printf("parent end!\n");
+   printf("parent end! pid : %d .\n", getpid());
  #endif
 
    bool wait = TRUE;
@@ -732,14 +740,14 @@ int child_func(){
 
    while(1){
     #ifdef _DEBUG
-      if(count++ == 20){
+      if(count++ == 1){
          lockf(share_mem_lock_fd, F_LOCK, 0);
          child_state[process_index] = STATE_READY;
          lockf(share_mem_lock_fd, F_ULOCK, 0);
          break;
       }
       //getchar();
-      printf("GO~~~~~~~~!!!!!!!!!!!!!!!!!\n");
+      //printf("GO~~~~~~~~!!!!!!!!!!!!!!!!!\n");
       // lockf(share_mem_lock_fd, F_LOCK, 0);
       // lockf(share_mem_lock_fd, F_ULOCK, 0);
     #endif
@@ -777,12 +785,12 @@ int child_func(){
       lockf(data_dir_lock_fd, F_LOCK, 0);
       if(ret_val = check_dir_num()){
          if(ret_val == REACH_DATA_LIMIT){
-            char *temp = web_data_dir_name;
-            for(; *temp != '/'; temp++);
+            char *temp = strrchr(web_data_dir_name, '/');
+            //for(; *temp != '/'; temp++);
             sprintf(++temp, "%d", ++(*web_data_dir_num));
 
             ret_val = SUCCESS;
-            ret_val = create_dir(temp);
+            ret_val = create_dir(web_data_dir_name);
             if(ret_val){
                printf("%s create ERROR!\n", DIR_TEMP);
                sprintf(temp, "%d", --(*web_data_dir_num));
@@ -831,6 +839,8 @@ int child_func(){
  #ifdef _DEBUG
    printf("child end!\n");
  #endif
+
+
    return SUCCESS;
 }
 
@@ -850,7 +860,7 @@ int get_todolist_url(){
 
    if(!info.st_size){
     #ifdef _DEBUG
-      printf("to do list file size is 0!\n");
+      //printf("to do list file size is 0!\n");
     #endif
 
       ret_val = TODOLIST_ZERO;
@@ -1074,7 +1084,7 @@ int setandsend_request(_OPENSSL *SSL, char *request){
                printf("openssl write ERROR! return : SSL_ERROR_NONE\n");
                break;
             case SSL_ERROR_ZERO_RETURN:
-               printf("openssl write ERROR! return : SSL_ERROR_ZERO_RETURN\n");
+               printf("openssl write ERROR! return : SSL_ERROR_ZERO_RETURN pid : %d .\n", getpid());
                openSSL_close(SSL);
                *(child_catch_url[process_index]) = 0;
 
@@ -1154,7 +1164,7 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
                printf("first openssl read ERROR! return : SSL_ERROR_NONE\n");
                break;
             case SSL_ERROR_ZERO_RETURN:
-               printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN pid : %d .\n", getpid());
                openSSL_close(SSL);
                *(child_catch_url[process_index]) = 0;
 
@@ -1243,7 +1253,7 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
                printf("first openssl read ERROR! return : SSL_ERROR_NONE\n");
                break;
             case SSL_ERROR_ZERO_RETURN:
-               printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN\n");
+               printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN pid : %d .\n", getpid());
                openSSL_close(SSL);
                *(child_catch_url[process_index]) = 0;
 
@@ -1379,9 +1389,9 @@ int response_head_handle(const char *response, int *body_len){
          resp_ptr += sizeof("Location: ") - 1;
 
          bool same_host = TRUE;
-         char *temp = strstr(resp_ptr, "://");
+         char *temp = strstr(resp_ptr, "https://");
          if(temp){
-            resp_ptr = temp + sizeof("://") - 1;
+            resp_ptr = temp + sizeof("https://") - 1;
             for(int i = 0; *temp != '/' && i < strlen(host_url); i++, temp++){
                if(*temp != host_url[i]){
                   same_host = FALSE;
@@ -1566,7 +1576,7 @@ int response_body_handle(const int data_fd){
 int add_todolist_file(char *add){
    int ret_val = URL_percent_encoding(add);
    if(ret_val){
-      printf("URL_percent_encoding ERROR! retunr : %d\n", ret_val);
+      printf("URL_percent_encoding ERROR! return : %d\n", ret_val);
 
       return ret_val;
    }
