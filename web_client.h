@@ -106,24 +106,26 @@ int   process_count = 5;
 int   process_index = -1;
 
 bool close_header = FALSE;
+bool plain_text   = FALSE;
 
 _DISK_HASH dh;
+_OPENSSL SSL_server;
 
 int HOST_string_conversion(const char original[], const char new[]);
 int to_do_list_url_string_conversion(const char original[], const char new[]);
 int create_dir(const char* dir_name);
 int create_socket();
-int openSSL_connect(_OPENSSL *SSL);
-int openSSL_close(_OPENSSL *SSL);
+int openSSL_connect();
+int openSSL_close();
 int parent_func();
 void sub_quit_signal_handle(int sig);
 int child_func();
 int get_todolist_url();
 int check_dir_num();
-int setandsend_request(_OPENSSL *SSL, char *request);
-int accept_response(_OPENSSL *SSL, char *response, int data_file_count);
-int open_web_data_file(int data_count, int *data_fd);
-int response_head_handle(const char *response, int *body_len);
+int setandsend_request();
+int accept_response(int data_file_count);
+int open_web_data_file(int data_count, int *data_fd, char *data_fname, int data_len);
+int response_head_handle(const char *response, int *body_len, const int data_fd);
 int response_body_handle(const int data_fd);
 int add_todolist_file(char *add);
 int disk_hash_find(const char *find_key);

@@ -235,10 +235,6 @@ int main(int argc, char *argv[]){
 
    if(process_index != -1){
       //child do
-    #ifdef _DEBUG
-      printf("child_func run!\n");
-    #endif
-
       child_func();
 
       return SUCCESS;
@@ -392,11 +388,7 @@ int create_dir(const char* dir_name){
    return SUCCESS;
 }
 
-int openSSL_connect(_OPENSSL *SSL){
-   if(!SSL){
-      return ERR_PARAMETER;
-   }
-
+int openSSL_connect(){
    const SSL_METHOD *method;
    int ret, i;
 
@@ -428,7 +420,7 @@ int openSSL_connect(_OPENSSL *SSL){
    /* ---------------------------------------------------------- *
    * Try to create a new SSL context                            *
    * ---------------------------------------------------------- */
-   if ( (SSL->ctx = SSL_CTX_new(method)) == NULL) {
+   if ( (SSL_server.ctx = SSL_CTX_new(method)) == NULL) {
     #ifdef _DEBUG
       printf("Unable to create a new SSL context structure.\n");
     #endif
@@ -439,18 +431,18 @@ int openSSL_connect(_OPENSSL *SSL){
    /* ---------------------------------------------------------- *
    * Disabling SSLv2 will leave v3 and TSLv1 for negotiation    *
    * ---------------------------------------------------------- */
-   SSL_CTX_set_options(SSL->ctx, SSL_OP_NO_SSLv2);
+   SSL_CTX_set_options(SSL_server.ctx, SSL_OP_NO_SSLv2);
 
    /* ---------------------------------------------------------- *
-   * Create new SSL connection state object                     *
+   * Create new SSL_server connection state object                     *
    * ---------------------------------------------------------- */
-   SSL->ssl = SSL_new(SSL->ctx);
+   SSL_server.ssl = SSL_new(SSL_server.ctx);
 
    /* ---------------------------------------------------------- *
    * Make the underlying TCP socket connection                  *
    * ---------------------------------------------------------- */
-   SSL->server = create_socket();
-   if(SSL->server != 0) {
+   SSL_server.server = create_socket();
+   if(SSL_server.server != 0) {
     #ifdef _DEBUG
       printf("Successfully made the TCP connection to: %s .\n", host_url);
     #endif
@@ -459,26 +451,26 @@ int openSSL_connect(_OPENSSL *SSL){
    /* ---------------------------------------------------------- *
    * Attach the SSL session to the socket descriptor            *
    * ---------------------------------------------------------- */
-   SSL_set_fd(SSL->ssl, SSL->server);
+   SSL_set_fd(SSL_server.ssl, SSL_server.server);
 
    /* ---------------------------------------------------------- *
    * Set to Support TLS SNI extension by Andric                 *
    * ---------------------------------------------------------- */
-   SSL_ctrl(SSL->ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, TLSEXT_NAMETYPE_host_name, (void*)host_url);
+   SSL_ctrl(SSL_server.ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, TLSEXT_NAMETYPE_host_name, (void*)host_url);
 
    /* ---------------------------------------------------------- *
-   * Try to SSL-connect here, returns 1 for success             *
+   * Try to SSL_server-connect here, returns 1 for success             *
    * ---------------------------------------------------------- */
-   if ((ret = SSL_connect(SSL->ssl)) != 1 ) {
+   if ((ret = SSL_connect(SSL_server.ssl)) != 1 ) {
       int err;
     #ifdef _DEBUG
       printf("Error: Could not build a SSL session to: %s .\n", host_url);
     #endif
 
       /* ---------------------------------------------------------- *
-      * Print SSL-connect error message by andric                  *
+      * Print SSL_server-connect error message by andric                  *
       * ---------------------------------------------------------- */
-      err = SSL_get_error(SSL->ssl, ret);
+      err = SSL_get_error(SSL_server.ssl, ret);
       if(err == SSL_ERROR_SSL) {
          ERR_load_crypto_strings();
          SSL_load_error_strings(); // just once
@@ -556,18 +548,18 @@ int create_socket(){
    return sockfd;
 }
 
-int openSSL_close(_OPENSSL *SSL){
-   if(!SSL){
+int openSSL_close(){
+/*    if(!SSL_server){
       return ERR_PARAMETER;
-   }
+   } */
 
   /* ---------------------------------------------------------- *
    * Free the structures we don't need anymore                  *
    * -----------------------------------------------------------*/
-   SSL_free(SSL->ssl);
-   close(SSL->server);
-   SSL_CTX_free(SSL->ctx);
-   memset(SSL, 0, sizeof(_OPENSSL));
+   SSL_free(SSL_server.ssl);
+   close(SSL_server.server);
+   SSL_CTX_free(SSL_server.ctx);
+   //memset(SSL_server, 0, sizeof(_OPENSSL));
 
    return SUCCESS;
 }
@@ -584,7 +576,7 @@ void sub_quit_signal_handle(int sig){
          if(!status){
             child_pid[i] = -1;
          }
-         else if(!*child_catch_url[i]){
+         else if(!(*(child_catch_url[i]))){
             child_pid[i] = fork();
          }
          else{
@@ -634,7 +626,7 @@ void sub_quit_signal_handle(int sig){
             process_index = i;
             child_func();
 
-            return;
+            exit(0);
          }
       }
    }
@@ -705,8 +697,13 @@ int parent_func(){
       sleep(PARENT_SLEEP_TIME);
       wait = FALSE;
       for(int i = 0; i < process_count; i++){
-         if(child_pid[i] != -1)
+         if(child_pid[i] != -1){
+          #ifdef _DEBUG
+            printf("child : %d not exit...\n", i);
+          #endif
+
             wait = TRUE;
+         }
       }
    }
 
@@ -719,6 +716,9 @@ int child_func(){
    // lockf(share_mem_lock_fd, F_LOCK, 0);
    // child_state[process_index] = STATE_RUN;
    // lockf(share_mem_lock_fd, F_ULOCK, 0);
+    #ifdef _DEBUG
+      printf("child_func run!\n");
+    #endif
 
    memset(add_todolist, 0, URL_LIMIT);
    int ret_val = SUCCESS;
@@ -726,8 +726,7 @@ int child_func(){
 
    prctl(PR_SET_PDEATHSIG, SIGTERM);
 
-   _OPENSSL SSL;
-   ret_val = openSSL_connect(&SSL);
+   ret_val = openSSL_connect();
    if(ret_val){
       printf("child pid : %5d, openssl connect ERROR! return : %2d\n", getpid(), ret_val);
 
@@ -740,7 +739,7 @@ int child_func(){
 
    while(1){
     #ifdef _DEBUG
-      if(count++ == 1){
+      if(count++ == 100){
          lockf(share_mem_lock_fd, F_LOCK, 0);
          child_state[process_index] = STATE_READY;
          lockf(share_mem_lock_fd, F_ULOCK, 0);
@@ -821,9 +820,8 @@ int child_func(){
       printf("web data dir name : %s\n", web_data_dir_name);
     #endif
 
-      char request[SOCKET_LEN], response[SOCKET_LEN]; // 請求 與 回應訊息
-      setandsend_request(&SSL, request);
-      accept_response(&SSL, response, data_file_count++);
+      setandsend_request();
+      accept_response(data_file_count++);
 
       // lockf(share_mem_lock_fd, F_LOCK, 0);
       // child_state[process_index] = STATE_READY;
@@ -840,6 +838,8 @@ int child_func(){
    printf("child end!\n");
  #endif
 
+   openSSL_close();
+
 
    return SUCCESS;
 }
@@ -855,6 +855,7 @@ int get_todolist_url(){
       printf("to do list file ERROR! retrun : %2d, %s .\n", errno, strerror(errno));
       lockf(todolist_lock_fd, F_ULOCK, 0);
 
+      openSSL_close();
       exit(errno);
    }
 
@@ -906,6 +907,7 @@ int get_todolist_url(){
             printf("disk hash find ERROR! return : %d\n", ret_val);
             lockf(todolist_lock_fd, F_ULOCK, 0);
 
+            openSSL_close();
             exit(ret_val);
          }
          else{
@@ -954,6 +956,7 @@ int get_todolist_url(){
       lockf(disk_hash_lock_fd, F_ULOCK, 0);
       lockf(todolist_lock_fd, F_ULOCK, 0);
 
+      openSSL_close();
       exit(ret_val);
    }
 
@@ -996,9 +999,7 @@ int check_dir_num(){
    return count > WEB_DATA_LIMIT ? REACH_DATA_LIMIT : SUCCESS;
 }
 
-int open_web_data_file(int data_count, int *data_fd){
-   int   data_len = strlen(web_data_dir_name) + 20;
-   char  data_fname[data_len];
+int open_web_data_file(int data_count, int *data_fd, char *data_fname, int data_len){
    char  *data_ptr = data_fname;
 
    strncpy(data_ptr, web_data_dir_name, data_len);
@@ -1013,7 +1014,7 @@ int open_web_data_file(int data_count, int *data_fd){
    strncpy(data_ptr, "_", 1);
    data_ptr++;
 
-   sprintf(data_ptr, "%d.txt", data_count);
+   sprintf(data_ptr, "%d", data_count);
 
  #ifdef _DEBUG
    printf("data file name : %s .\n", data_fname);
@@ -1029,12 +1030,13 @@ int open_web_data_file(int data_count, int *data_fd){
    return SUCCESS;
 }
 
-int setandsend_request(_OPENSSL *SSL, char *request){
+int setandsend_request(){
+   char request[SOCKET_LEN];
+   //memset(request, 0, SOCKET_LEN);
+
    char  *req_ptr    = request;
    int   req_limit   = SOCKET_LEN;
    int   ret         = SUCCESS;
-
-   memset(request, 0, SOCKET_LEN);
 
    strncpy(req_ptr, "GET ", req_limit);
    req_ptr     += sizeof("GET ") - 1;
@@ -1066,6 +1068,8 @@ int setandsend_request(_OPENSSL *SSL, char *request){
    req_ptr     += sizeof("\r\n") - 1;
    req_limit   -= sizeof("\r\n") - 1;
 
+   *req_ptr = 0;
+
  #ifdef _DEBUG
    printf("\n********** pid : %2d Request: **********\n%s\n", process_index, request);
    printf(  "****************************************\n\n");
@@ -1075,9 +1079,9 @@ int setandsend_request(_OPENSSL *SSL, char *request){
    while(want_write){
       want_write = FALSE;
 
-      ret = SSL_write(SSL->ssl, request, strlen(request));
+      ret = SSL_write(SSL_server.ssl, request, strlen(request));
       if(ret <= 0){
-         int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
+         int ssl_get_ret = SSL_get_error(SSL_server.ssl, ret);
 
          switch(ssl_get_ret){
             case SSL_ERROR_NONE:
@@ -1085,7 +1089,7 @@ int setandsend_request(_OPENSSL *SSL, char *request){
                break;
             case SSL_ERROR_ZERO_RETURN:
                printf("openssl write ERROR! return : SSL_ERROR_ZERO_RETURN pid : %d .\n", getpid());
-               openSSL_close(SSL);
+               openSSL_close();
                *(child_catch_url[process_index]) = 0;
 
                exit(ERR_OPENSSL);
@@ -1112,19 +1116,19 @@ int setandsend_request(_OPENSSL *SSL, char *request){
                break;
             case SSL_ERROR_SYSCALL:
                printf("openssl write ERROR! return : SSL_ERROR_SYSCALL\n");
-               openSSL_close(SSL);
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
             case SSL_ERROR_SSL:
                printf("openssl write ERROR! return : SSL_ERROR_SSL\n");
-               openSSL_close(SSL);
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
             default :
                printf("openssl write ERROR! return : ELSE\n");
-               openSSL_close(SSL);
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
@@ -1136,13 +1140,25 @@ int setandsend_request(_OPENSSL *SSL, char *request){
    return SUCCESS;
 }
 
-int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
+int accept_response(int data_file_count){
    int data_fd = 0;
    int ret = SUCCESS;
    int body_len = 0;
 
-   if(ret = open_web_data_file(data_file_count, &data_fd)){
+   void *response = malloc(SOCKET_LEN);
+   if(!response){
+      printf("response malloc ERROR! errorn : %d  message : %s .\n", errno, strerror(errno));
+      openSSL_close();
+
+      exit(ERR_OUT_OF_MEM);
+   }
+   //*((char*)(response + SOCKET_LEN - 1)) = 0;
+
+   int   data_len = strlen(web_data_dir_name) + 20;
+   char  data_fname[data_len];
+   if(ret = open_web_data_file(data_file_count, &data_fd, data_fname, data_len)){
       printf("response open web data file ERROR! return : %d .\n", ret);
+      openSSL_close();
 
       exit(ret);
    }
@@ -1156,16 +1172,16 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
       want_read = FALSE;
       memset(response, 0, SOCKET_LEN);
 
-      ret = SSL_read(SSL->ssl, response, SOCKET_LEN);
+      ret = SSL_read(SSL_server.ssl, response, SOCKET_LEN - 1);
       if(ret <= 0){
-         int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
+         int ssl_get_ret = SSL_get_error(SSL_server.ssl, ret);
          switch(ssl_get_ret){
             case SSL_ERROR_NONE:
                printf("first openssl read ERROR! return : SSL_ERROR_NONE\n");
                break;
             case SSL_ERROR_ZERO_RETURN:
                printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN pid : %d .\n", getpid());
-               openSSL_close(SSL);
+               openSSL_close();
                *(child_catch_url[process_index]) = 0;
 
                exit(ERR_OPENSSL);
@@ -1192,19 +1208,19 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
                break;
             case SSL_ERROR_SYSCALL:
                printf("first openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
-               openSSL_close(SSL);
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
             case SSL_ERROR_SSL:
                printf("first openssl read ERROR! return : SSL_ERROR_SSL\n");
-               openSSL_close(SSL);
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
             default :
                printf("first openssl read ERROR! return : ELSE\n");
-               openSSL_close(SSL);
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
@@ -1216,8 +1232,9 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
    //printf("%s\n", response);
  #endif
 
-   if(ret = response_head_handle(response, &body_len)){
+   if(ret = response_head_handle((char*)response, &body_len, data_fd)){
       printf("response head handle ERROR! return : %d .\n", ret);
+      openSSL_close();
 
       exit(ret);
    }
@@ -1226,108 +1243,111 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
    printf(  "****************************************\n\n");
  #endif
 
-   char write_temp[URL_LIMIT];
-   add_todolist[strlen(add_todolist)] = '\n';
-   sprintf(write_temp, "%s\n", add_todolist);
-   if(strlen(write_temp) != write(data_fd, write_temp, strlen(write_temp))){
-      printf("write_temp add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
-
-      return ERR_WRITE;
-   }
-   add_todolist[strlen(add_todolist) - 1] = '\0';
-
-   if(strlen(response) != write(data_fd, response, strlen(response))){
-      printf("first add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
-
-      return ERR_WRITE;
-   }
-
    while(body_len){
+      if(body_len < -1){
+         printf("response body len ERROR!\n");
+
+         exit(ERR_OPENSSL);
+      }
+
+      void *resp_ptr = response;
+      //*((char*)(response + SOCKET_LEN - 1)) = 0;
       memset(response, 0, SOCKET_LEN);
 
-      ret = SSL_read(SSL->ssl, response, SOCKET_LEN);
+      ret = SSL_read(SSL_server.ssl, response, SOCKET_LEN - 1);
       if(ret <= 0){
-         int ssl_get_ret = SSL_get_error(SSL->ssl, ret);
+         int ssl_get_ret = SSL_get_error(SSL_server.ssl, ret);
          switch(ssl_get_ret){
             case SSL_ERROR_NONE:
-               printf("first openssl read ERROR! return : SSL_ERROR_NONE\n");
+               printf("openssl read ERROR! return : SSL_ERROR_NONE\n");
                break;
             case SSL_ERROR_ZERO_RETURN:
-               printf("first openssl read ERROR! return : SSL_ERROR_ZERO_RETURN pid : %d .\n", getpid());
-               openSSL_close(SSL);
+               printf("openssl read ERROR! return : SSL_ERROR_ZERO_RETURN pid : %d .\n", getpid());
+               openSSL_close();
                *(child_catch_url[process_index]) = 0;
 
                exit(ERR_OPENSSL);
                break;
             case SSL_ERROR_WANT_READ:
-               printf("first openssl read ERROR! return : SSL_ERROR_WANT_READ\n");
+               printf("openssl read ERROR! return : SSL_ERROR_WANT_READ\n");
                continue;
 
                break;
             case SSL_ERROR_WANT_CONNECT:
-               printf("first openssl read ERROR! return : SSL_ERROR_WANT_CONNECT\n");
+               printf("openssl read ERROR! return : SSL_ERROR_WANT_CONNECT\n");
                continue;
 
                break;
             case SSL_ERROR_WANT_ACCEPT:
-               printf("first openssl read ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
+               printf("openssl read ERROR! return : SSL_ERROR_WANT_ACCEPT\n");
                continue;
 
                break;
             case SSL_ERROR_WANT_X509_LOOKUP:
-               printf("first openssl read ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
+               printf("openssl read ERROR! return : SSL_ERROR_WANT_X509_LOOKUP\n");
                continue;
 
                break;
             case SSL_ERROR_SYSCALL:
-               printf("first openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
-               openSSL_close(SSL);
+               printf("openssl read ERROR! return : SSL_ERROR_SYSCALL\n");
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
             case SSL_ERROR_SSL:
-               printf("first openssl read ERROR! return : SSL_ERROR_SSL\n");
-               openSSL_close(SSL);
+               printf("openssl read ERROR! return : SSL_ERROR_SSL\n");
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
             default :
-               printf("first openssl read ERROR! return : ELSE\n");
-               openSSL_close(SSL);
+               printf("openssl read ERROR! return : ELSE\n");
+               openSSL_close();
 
                exit(ERR_OPENSSL);
                break;
          }
       }
 
-      if(strlen(response) != write(data_fd, response, strlen(response))){
+      if(body_len == -1){
+         resp_ptr = strstr(response, "\r\n");
+         resp_ptr += sizeof("\r\n") - 1;
+      }
+
+      char *end_ptr = NULL;
+      //end_ptr = strstr(resp_ptr, "\r\n");end_ptr - (char*)resp_ptr
+//if(strstr((char*)response, "0\r\n\r\n"))break;
+
+      if(body_len != -1){
+         body_len -= strlen(resp_ptr);
+
+       #ifdef _DEBUG
+         if(body_len <= 0){
+            printf("body len : %d\n", body_len);
+            //break;
+         }
+       #endif
+      }
+      else{
+         if(end_ptr = strstr((char*)response, "0\r\n\r\n")){
+            if(end_ptr == (char*)response || *(end_ptr - 1) == '\n'){
+             #ifdef _DEBUG
+               printf("write ... body len : chunked\n");
+             #endif
+
+               *end_ptr = 0;
+            }
+         }
+      }
+
+      if(strlen(resp_ptr) != write(data_fd, resp_ptr, strlen(resp_ptr))){
          printf("temp add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
 
          return ERR_WRITE;
       }
 
-      if(body_len != -1){
-         body_len -= strlen(response);
-
-       #ifdef _DEBUG
-         if(body_len <= 0){
-            printf("body len : %d\n", body_len);
-            break;
-         }
-       #endif
-      }
-      else{
-         char *temp;
-         if(temp = strstr(response, "0\r\n\r\n")){
-            if(temp == response || *(temp - 1) == '\n'){
-             #ifdef _DEBUG
-               printf("write ... body len : chunked\n");
-             #endif
-
-               break;
-            }
-         }
-
+      if(end_ptr){
+         break;
       }
 
        #ifdef _DEBUG
@@ -1336,10 +1356,21 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
        #endif
    }
 
-   response_body_handle(data_fd);
+   if(plain_text){
+      response_body_handle(data_fd);
+   }
+
+   if(!lseek(data_fd, 0, SEEK_END)){
+      close(data_fd);
+      remove(data_fname);
+   }
+   else{
+      close(data_fd);
+   }
 
    if(close_header){
       *(child_catch_url[process_index]) = 0;
+      openSSL_close();
 
       exit(ERR_SSL_CONNCET);
    }
@@ -1348,10 +1379,12 @@ int accept_response(_OPENSSL *SSL, char *response, int data_file_count){
    return SUCCESS;
 }
 
-int response_head_handle(const char *response, int *body_len){
+int response_head_handle(const char *response, int *body_len, const int data_fd){
    if(!response){
       return ERR_PARAMETER;
    }
+
+   plain_text = FALSE;
 
    char *resp_ptr    = (char*)response;
    int   resp_status = 0;
@@ -1371,6 +1404,10 @@ int response_head_handle(const char *response, int *body_len){
       }
       else if(resp_ptr = strstr(response, "Transfer-Encoding: chunked")){
          *body_len = -1;
+      }
+
+      if(strstr(response, "Content-Type: text/plain") || strstr(response, "Content-Type: text/html") || strstr(response, "Content-Type: application/xhtml+xml")){
+         plain_text = TRUE;
       }
    }
    else if(resp_status >= 300 && resp_status < 400){
@@ -1432,14 +1469,34 @@ int response_head_handle(const char *response, int *body_len){
       *body_len = 0;
    }
 
-   if(*body_len > 0){
-      resp_ptr =  strstr(response, "\r\n\r\n");
-      resp_ptr += (sizeof("\r\n\r\n") - 1);
-      *body_len -= strlen(resp_ptr);
-   }
-
    if(strstr(response, "Connection: close")){
       close_header = TRUE;
+   }
+
+   resp_ptr =  strstr(response, "\r\n\r\n");
+   resp_ptr += sizeof("\r\n\r\n") - 1;
+   if(*body_len > 0){
+      *body_len -= strlen(resp_ptr);
+   }
+   else if(*body_len == -1){
+      resp_ptr = strstr(resp_ptr, "\r\n");
+      resp_ptr += sizeof("\r\n") - 1;
+   }
+
+   /* char write_temp[URL_LIMIT];
+   add_todolist[strlen(add_todolist)] = '\n';
+   sprintf(write_temp, "%s\n", add_todolist);
+   if(strlen(write_temp) != write(data_fd, write_temp, strlen(write_temp))){
+      printf("write_temp add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
+
+      return ERR_WRITE;
+   }
+   add_todolist[strlen(add_todolist) - 1] = '\0' */;
+
+   if(strlen((char*)resp_ptr) != write(data_fd, (void*)resp_ptr, strlen((char*)resp_ptr))){
+      printf("first add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
+
+      return ERR_WRITE;
    }
 
    return SUCCESS;
@@ -1541,6 +1598,7 @@ int response_body_handle(const int data_fd){
       if(same_host){
          if(ret = add_todolist_file(temp)){
             printf("response_body_handle add_todolist_file ERROR!\n");
+            openSSL_close();
 
             exit(ret);
          }
@@ -1567,8 +1625,6 @@ int response_body_handle(const int data_fd){
     #ifdef _DEBUG
       printf("<a is not find!!\n");
     #endif
-
-   close(data_fd);
 
    return SUCCESS;
 }
