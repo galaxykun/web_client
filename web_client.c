@@ -636,6 +636,9 @@ void sub_quit_signal_handle(int sig){
 }
 
 int parent_func(){
+ #ifdef _DEBUG
+   printf("parent run!\n");
+ #endif
    signal(SIGCHLD, sub_quit_signal_handle);
 
    while(1){
@@ -673,7 +676,7 @@ int parent_func(){
             end = FALSE;
 
           #ifdef _DEBUG
-            end = TRUE;
+            //end = TRUE;
           #endif
          }
       }
@@ -739,7 +742,7 @@ int child_func(){
 
    while(1){
     #ifdef _DEBUG
-      if(count++ == 100){
+      if(count++ == 1){
          lockf(share_mem_lock_fd, F_LOCK, 0);
          child_state[process_index] = STATE_READY;
          lockf(share_mem_lock_fd, F_ULOCK, 0);
@@ -827,6 +830,8 @@ int child_func(){
       // child_state[process_index] = STATE_READY;
       // lockf(share_mem_lock_fd, F_ULOCK, 0);
 
+      *(child_catch_url[process_index]) = 0;
+
       sleep(CHILD_SLEEP_TIME);
 
     #ifdef _DEBUG
@@ -885,11 +890,12 @@ int get_todolist_url(){
       }
       todolist_buf_ptr = todolist_buf;
 
-      bool find_url = TRUE;
-      while(find_url){
+      //bool find_url = TRUE;
+      while(1){
          char *temp_chr = strchr(todolist_buf_ptr, '\n');
          if(!temp_chr){
             todolist_buf_ptr = NULL;
+            *add_todolist = 0;
 
             break;
          }
@@ -900,8 +906,7 @@ int get_todolist_url(){
 
          ret_val = disk_hash_find(add_todolist);
          if(ret_val == NOT_FOUND){
-            find_url = FALSE;
-
+            break;
          }
          else if(ret_val){
             printf("disk hash find ERROR! return : %d\n", ret_val);
@@ -916,8 +921,7 @@ int get_todolist_url(){
 
          if(todolist_buf_ptr - todolist_buf >= info.st_size){
             todolist_buf_ptr = NULL;
-
-            find_url = FALSE;
+            *add_todolist = 0;
          }
       }
 
@@ -933,6 +937,12 @@ int get_todolist_url(){
          }
          ftruncate(todolist_fd, strlen(todolist_buf_ptr));
       }
+   }
+
+   if(!*add_todolist){
+      ret_val = TODOLIST_ZERO;
+
+      goto ERROR;
    }
 
    if(*add_todolist != '/'){
@@ -1014,7 +1024,7 @@ int open_web_data_file(int data_count, int *data_fd, char *data_fname, int data_
    strncpy(data_ptr, "_", 1);
    data_ptr++;
 
-   sprintf(data_ptr, "%d", data_count);
+   sprintf(data_ptr, "%d.txt", data_count);
 
  #ifdef _DEBUG
    printf("data file name : %s .\n", data_fname);
@@ -1399,31 +1409,31 @@ int response_head_handle(const char *response, int *body_len, const int data_fd)
    }
    else if(resp_status >= 200 && resp_status < 300){
       *body_len = 0;
-      if(resp_ptr = strstr(response, "Content-Length:")){
-         *body_len = atoi((resp_ptr + sizeof("Content-Length:")));
+      if(resp_ptr = strstr(response, "\r\nContent-Length:")){
+         *body_len = atoi((resp_ptr + sizeof("\r\nContent-Length:")));
       }
-      else if(resp_ptr = strstr(response, "Transfer-Encoding: chunked")){
+      else if(resp_ptr = strstr(response, "\r\nTransfer-Encoding: chunked")){
          *body_len = -1;
       }
 
-      if(strstr(response, "Content-Type: text/plain") || strstr(response, "Content-Type: text/html") || strstr(response, "Content-Type: application/xhtml+xml")){
+      if(strstr(response, "\r\nContent-Type: text/plain") || strstr(response, "\r\nContent-Type: text/html") || strstr(response, "\r\nContent-Type: application/xhtml+xml")){
          plain_text = TRUE;
       }
    }
    else if(resp_status >= 300 && resp_status < 400){
       char temp_add[URL_LIMIT];
 
-      resp_ptr = strstr(response, "Content-Length:");
+      resp_ptr = strstr(response, "\r\nContent-Length:");
       if(resp_ptr){
-         *body_len = atoi((resp_ptr + sizeof("Content-Length:")));
+         *body_len = atoi((resp_ptr + sizeof("\r\nContent-Length:")));
       }
       else{
          *body_len = 0;
       }
 
-      resp_ptr = strstr(response, "Location: ");
+      resp_ptr = strstr(response, "\r\nLocation: ");
       if(resp_ptr){
-         resp_ptr += sizeof("Location: ") - 1;
+         resp_ptr += sizeof("\r\nLocation: ") - 1;
 
          bool same_host = TRUE;
          char *temp = strstr(resp_ptr, "https://");
