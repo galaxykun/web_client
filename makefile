@@ -1,6 +1,6 @@
 all : web_client DEBUG
 
-restart : clean web_client DEBUG run_debug
+restart : clean web_client DEBUG run_debug_tee
 
 web_client:
 	gcc web_client.c -o web_client -lssl -lcrypto
@@ -31,6 +31,9 @@ run_debug5:
 
 run_debug6:
 	./web_client_debug "https://www.openfind.com.tw/taiwan/markettrend.php"  webpage/  1
+
+run_debug7:
+	./web_client_debug "https://www.openfind.com.tw/taiwan/download/casestudy/CaseStudy_10195.pdf"  webpage/  5
 
 
 clean:

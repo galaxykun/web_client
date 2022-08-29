@@ -107,6 +107,7 @@ int   process_index = -1;
 
 bool close_header = FALSE;
 bool plain_text   = FALSE;
+bool is_chuncked  = FALSE;
 
 _DISK_HASH dh;
 _OPENSSL SSL_server;
@@ -125,10 +126,11 @@ int check_dir_num();
 int setandsend_request();
 int accept_response(int data_file_count);
 int open_web_data_file(int data_count, int *data_fd, char *data_fname, int data_len);
-int response_head_handle(const char *response, int *body_len, const int data_fd);
+int response_head_handle(const char *response, int *body_len, const int data_fd, long *resp_len);
 int response_body_handle(const int data_fd);
 int add_todolist_file(char *add);
 int disk_hash_find(const char *find_key);
 int URL_percent_encoding(char original[]);
+bool ssl_get_error_func(int ret);
 
 #endif
