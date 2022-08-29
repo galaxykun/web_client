@@ -1085,7 +1085,7 @@ int accept_response(int data_file_count){
    int data_fd = 0;
    int ret = SUCCESS;
    int body_len = 0;
-   long resp_len = 0;
+   int resp_len = 0;
 
    void *response = malloc(SOCKET_LEN);
    if(!response){
@@ -1112,7 +1112,7 @@ int accept_response(int data_file_count){
    //printf("%s\n", response);
  #endif
 
-   if(ret = response_head_handle((char*)response, &body_len, data_fd, &resp_len)){
+   if(ret = response_head_handle((char*)response, &body_len, data_fd)){
       printf("response head handle ERROR! return : %d .\n", ret);
       openSSL_close();
 
@@ -1123,9 +1123,10 @@ int accept_response(int data_file_count){
    printf(  "****************************************\n\n");
  #endif
 
-   void *resp_ptr = response;
+
    if(is_chuncked){
       while(1){
+         memset(response, 0, URL_LIMIT);
          resp_len = SSL_read(SSL_server.ssl, response, SOCKET_LEN - 1);
          if(resp_len <= 0){
             bool ssl_get_ret = ssl_get_error_func(resp_len);
@@ -1137,17 +1138,26 @@ int accept_response(int data_file_count){
             }
          }
 
+         void *resp_ptr = response;
+
          if(resp_len > body_len){
-            if(body_len != write(data_fd, resp_ptr, body_len)){
+            if(body_len > 0 && body_len != write(data_fd, resp_ptr, body_len)){
                printf("temp add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
 
                return ERR_WRITE;
             }
 
-            resp_ptr += body_len;
-            body_len = strtol(resp_ptr, NULL, 16);
-            if(!body_len){
-               break;
+            resp_ptr += body_len + 2;
+            if(*(char*)resp_ptr){
+               body_len = strtol(resp_ptr, NULL, 16);
+               if(!body_len){
+                  break;
+               }
+            }
+            else{
+               body_len = -2;
+
+               continue;
             }
 
             resp_ptr = strstr(resp_ptr, "\r\n");
@@ -1157,7 +1167,7 @@ int accept_response(int data_file_count){
          }
 
          body_len -= resp_len;
-         if(resp_len != write(data_fd, resp_ptr, resp_len)){
+         if(resp_len - 2 != write(data_fd, resp_ptr, resp_len - 2)){
             printf("temp add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
 
             return ERR_WRITE;
@@ -1166,6 +1176,14 @@ int accept_response(int data_file_count){
    }
    else{
       while(body_len){
+         memset(response, 0, URL_LIMIT);
+
+         if(body_len < 0){
+            printf("response body len ERROR!\n");
+
+            exit(ERR_CHILD);
+         }
+
          resp_len = SSL_read(SSL_server.ssl, response, SOCKET_LEN - 1);
          if(resp_len <= 0){
             bool ssl_get_ret = ssl_get_error_func(resp_len);
@@ -1177,7 +1195,7 @@ int accept_response(int data_file_count){
             }
          }
 
-         if(resp_len != write(data_fd, resp_ptr, resp_len)){
+         if(resp_len != write(data_fd, response, resp_len)){
             printf("temp add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
 
             return ERR_WRITE;
@@ -1210,7 +1228,7 @@ int accept_response(int data_file_count){
    return SUCCESS;
 }
 
-int response_head_handle(const char *response, int *body_len, const int data_fd, long *resp_len){
+int response_head_handle(const char *response, int *body_len, const int data_fd){
    if(!response){
       return ERR_PARAMETER;
    }
@@ -1218,14 +1236,15 @@ int response_head_handle(const char *response, int *body_len, const int data_fd,
    char *resp_ptr    = (char*)response;
    int   resp_status = 0;
    bool want_read = TRUE;
+   int resp_len = 0;
 
    while(want_read){
       want_read = FALSE;
       memset(resp_ptr, 0, SOCKET_LEN);
 
-      *resp_len = SSL_read(SSL_server.ssl, resp_ptr, SOCKET_LEN - 1);
-      if(*resp_len <= 0){
-         int ssl_get_ret = ssl_get_error_func(*resp_len);
+      resp_len = SSL_read(SSL_server.ssl, resp_ptr, SOCKET_LEN - 1);
+      if(resp_len <= 0){
+         int ssl_get_ret = ssl_get_error_func(resp_len);
          if(ssl_get_ret){
             want_read = TRUE;
          }
@@ -1238,21 +1257,19 @@ int response_head_handle(const char *response, int *body_len, const int data_fd,
    plain_text  = FALSE;
    is_chuncked = FALSE;
 
-   resp_ptr    = strchr(resp_ptr, ' ');
+   resp_ptr    = strchr(response, ' ');
    resp_status = atoi(++resp_ptr);
 
    printf("%s response status code : %d .\n", add_todolist, resp_status);
 
    if(resp_status >= 100 && resp_status < 200){
-      *body_len = 0;
+      return SUCCESS;
    }
    else if(resp_status >= 200 && resp_status < 300){
-      *body_len = 0;
       if(resp_ptr = strstr(response, "\r\nContent-Length:")){
          *body_len = atoi((resp_ptr + sizeof("\r\nContent-Length:")));
       }
       else if(resp_ptr = strstr(response, "\r\nTransfer-Encoding: chunked")){
-         *body_len = -1;
          is_chuncked = TRUE;
       }
 
@@ -1313,10 +1330,10 @@ int response_head_handle(const char *response, int *body_len, const int data_fd,
       }
    }
    else if(resp_status >= 400 && resp_status < 500){
-      *body_len = 0;
+      return SUCCESS;
    }
    else{
-      *body_len = 0;
+      return SUCCESS;
    }
 
    if(strstr(response, "Connection: close")){
@@ -1326,19 +1343,26 @@ int response_head_handle(const char *response, int *body_len, const int data_fd,
    resp_ptr =  strstr(response, "\r\n\r\n");
    resp_ptr += sizeof("\r\n\r\n") - 1;
    if(is_chuncked){
-      *body_len = strtol(resp_ptr, NULL, 16);
-      resp_ptr =  strstr(resp_ptr, "\r\n");
-      resp_ptr += sizeof("\r\n") - 1;
-   }
-   *resp_len -= (resp_ptr - response);
+      if(*resp_ptr){
+         *body_len = strtol(resp_ptr, NULL, 16);
+         resp_ptr =  strstr(resp_ptr, "\r\n");
+         resp_ptr += sizeof("\r\n") - 1;
+      }
+      else{
+         *body_len = -2;
 
-   if(*resp_len != write(data_fd, (void*)resp_ptr, *resp_len)){
+         return SUCCESS;
+      }
+   }
+   resp_len -= (resp_ptr - response);
+
+   if(resp_len != write(data_fd, (void*)resp_ptr, resp_len)){
       printf("first add to do list write ERROR! return : %2d, %s .\n", errno, strerror(errno));
 
       return ERR_WRITE;
    }
 
-   *body_len -= *resp_len;
+   *body_len -= resp_len;
 
 
    return SUCCESS;
@@ -1372,18 +1396,12 @@ int response_body_handle(const int data_fd){
       for(; *a_href_ptr == '\"' || *a_href_ptr == '\'' || *a_href_ptr == ' '; a_href_ptr++);
 
       char *temp = a_href_ptr;
-      for(; *temp && *temp != '\"' && *temp != ' ' && *temp != '>' && *temp != '\''; temp++);
+      for(; *temp && *temp != '\"' && *temp != ' ' && *temp != '>' && *temp != '\'' && *temp != '\r' && *temp != '\n'; temp++);
 
       char body_add[URL_LIMIT];
       memset(body_add, 0, URL_LIMIT);
 
-      for(char *fptr = a_href_ptr, *sptr = body_add; fptr != temp && (fptr - a_href_ptr) < (URL_LIMIT - 1); fptr++, sptr++){
-         if(*fptr == '\r'){
-            fptr = strstr((fptr + 1), "\r\n");
-            fptr += 2;
-         }
-         *sptr = *fptr;
-      }
+      strncpy(body_add, a_href_ptr, (temp - a_href_ptr) < (URL_LIMIT - 1) ? (temp - a_href_ptr) : (URL_LIMIT - 1));
 
       bool same_host = TRUE;
       if(temp = strstr(body_add, "://")){

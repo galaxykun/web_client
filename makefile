@@ -10,9 +10,10 @@ DEBUG:
 
 run_debug_tee:
 	./web_client_debug "https://www.openfind.com.tw/" webpage/ 5 | tee result.txt
+#	./web_client_debug "https://www.ccu.edu.tw/" webpage/ 1 | tee result.txt
 
 run_debug:
-	./web_client_debug "https://www.openfind.com.tw/" webpage/ 5
+	./web_client_debug "https://www.ccu.edu.tw/" webpage/ 1
 
 run_debug1:
 	./web_client_debug "https://www.openfind.com.tw:443/taiwan/markettrend_detail.php?news_id=24799" webpage/ 2
@@ -35,6 +36,8 @@ run_debug6:
 run_debug7:
 	./web_client_debug "https://www.openfind.com.tw/taiwan/download/casestudy/CaseStudy_10195.pdf"  webpage/  5
 
+run_debug8:
+	./web_client_debug "https://www.openfind.com.tw/taiwan/download/2019Osecure.pdf"  webpage/  5
 
 clean:
 	rm -rf web_client web_client_debug data webpage temp
